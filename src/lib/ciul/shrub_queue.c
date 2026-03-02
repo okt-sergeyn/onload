@@ -327,6 +327,7 @@ int ef_shrub_queue_open(struct ef_shrub_queue* queue,
     goto fail_queue_attach;
 
   queue->ix = rc;
+  efct_ubufs_set_is_shrub_controller(vi);
   return 0;
 
 fail_queue_attach:
