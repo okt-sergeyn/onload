@@ -1375,7 +1375,10 @@ void efct_vi_start_rxq(ef_vi* vi, int ix, int qid)
   efct_get_rxq_state(vi, ix)->qid = qid;
   rxq->config_generation = 0;
   rxq_ptr->superbuf_pkts = *rxq->live.superbuf_pkts;
-  rxq_ptr->meta_pkt = rxq_ptr->superbuf_pkts + 1;
+  /* Set meta_pkt to trigger rollover on first poll. Encode sbseq as -1 so
+   * that the wakeup params calculation ((sbseq >> 32) + 1) gives sbseq 0,
+   * allowing correct priming before the first poll has occurred. */
+  rxq_ptr->meta_pkt = ((uint64_t)-1 << 32) | (rxq_ptr->superbuf_pkts + 1);
   rxq_ptr->meta_offset = vi->efct_rxqs.meta_offset;
 
   EF_VI_ASSERT(rxq_ptr->superbuf_pkts > 0);
