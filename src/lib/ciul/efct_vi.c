@@ -1521,11 +1521,12 @@ efct_design_parameters(struct ef_vi* vi, struct efab_nic_design_parameters* dp)
   return 0;
 }
 
-static int efct_pre_filter_add(struct ef_vi* vi, bool shared_mode)
+static int efct_pre_filter_add(struct ef_vi* vi, bool shared_mode,
+                               bool wants_interrupts)
 {
   int rc = 0;
   if( vi->efct_rxqs.ops->pre_attach )
-    rc = vi->efct_rxqs.ops->pre_attach(vi, shared_mode);
+    rc = vi->efct_rxqs.ops->pre_attach(vi, shared_mode, wants_interrupts);
 
   return rc;
 }
@@ -1541,6 +1542,7 @@ static int efct_post_filter_add(struct ef_vi* vi,
 #else
   int rc;
   unsigned n_superbufs;
+  bool request_wakeups;
 
    /* Block filters don't attach to an RXQ */
   if( ef_vi_filter_is_block_only(cookie) )
@@ -1549,11 +1551,9 @@ static int efct_post_filter_add(struct ef_vi* vi,
   EF_VI_ASSERT(rxq >= 0);
   n_superbufs = CI_ROUND_UP((vi->vi_rxq.mask + 1) * EFCT_PKT_STRIDE,
                             EFCT_RX_SUPERBUF_BYTES) / EFCT_RX_SUPERBUF_BYTES;
-  /* TODO currently we don't have support for requesting interrupts from ef_vi
-   * clients. When we wire that in, it will be fed through here. Note that in the
-   * efct_kbufs case interrupts are always enabled anyway. */
+  request_wakeups = (fs->flags & EF_FILTER_FLAG_REQUEST_WAKEUPS) != 0;
   rc = vi->efct_rxqs.ops->attach(vi, rxq, -1, n_superbufs, shared_mode,
-                                 false, &rxq);
+                                 request_wakeups, &rxq);
   if( rc == -EALREADY )
     rc = 0;
   return rc;

@@ -361,27 +361,40 @@ int efct_ubufs_get_shared_filter_info(ef_vi* vi, unsigned* token,
   return 0;
 }
 
-static int efct_ubufs_pre_attach(ef_vi* vi, bool shared_mode)
+static int efct_ubufs_pre_attach(ef_vi* vi, bool shared_mode,
+                                 bool wants_interrupts)
 {
   struct efct_ubufs *ubufs = get_ubufs(vi);
   unsigned token;
   bool use_interrupts;
   int rc;
 
-  if( ! shared_mode || ubufs->is_shrub_filter_info_set )
+  if( ! shared_mode )
     return 0;
 
-  rc = efct_ubufs_get_shared_filter_info(vi, &token, &use_interrupts);
-  if( rc < 0 )
-    return rc;
+  if( !ubufs->is_shrub_filter_info_set ) {
+    rc = efct_ubufs_get_shared_filter_info(vi, &token, &use_interrupts);
+    if( rc < 0 )
+      return rc;
 
-  rc = efct_ubufs_set_shared_rxq_token(vi, token);
-  if( rc == 0 ) {
+    rc = efct_ubufs_set_shared_rxq_token(vi, token);
+    if( rc < 0 )
+      return rc;
+
     ubufs->is_shrub_filter_info_set = true;
     ubufs->shrub_use_interrupts = use_interrupts;
   }
 
-  return rc;
+  /* This is a convenient early fail point if a client has asked for an invalid
+   * configuration, allowing us to bail out before we get as far as the actual
+   * filter install which would leave us with an allocated RXQ to clean up. */
+  if( wants_interrupts && !ubufs->shrub_use_interrupts ) {
+    ef_log("%s: Error: shrub controller must be configured to use interrupts "
+           "to allow clients to use interrupts", __FUNCTION__);
+    return -EINVAL;
+  }
+
+  return 0;
 }
 
 static int efct_ubufs_attach(ef_vi* vi,
@@ -410,8 +423,11 @@ static int efct_ubufs_attach(ef_vi* vi,
 
   /* For ef_vi shrub clients the interrupt mode is currently decided solely by the
    * controller configuration. */
-  if( shared_mode )
+  if( shared_mode ) {
+    /* We should have checked this in the pre-attach phase */
+    EF_VI_ASSERT(!use_interrupts || ubufs->shrub_use_interrupts);
     use_interrupts = ubufs->shrub_use_interrupts;
+  }
 
   rc = efct_ubufs_init_rxq_resource(vi, qid, n_superbufs, use_interrupts,
                                     &rxq->rxq_id);
