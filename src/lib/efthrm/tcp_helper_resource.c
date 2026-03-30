@@ -1628,7 +1628,8 @@ static void choose_evq_size(struct vi_allocate_info* info)
     ;
 }
 
-static int allocate_vi(ci_netif* ni, struct vi_allocate_info* info)
+static int allocate_vi(ci_netif* ni, struct vi_allocate_info* info,
+                       struct efhw_nic* nic)
 {
   int rc = -EDOM;  /* Placate compiler. */
 
@@ -1708,6 +1709,9 @@ static int allocate_vi(ci_netif* ni, struct vi_allocate_info* info)
         info->efhw_flags  |= features[i].efhw_flags;
         info->oo_vi_flags |= features[i].oo_vi_flags;
       }
+
+    info->evq_reserved_events =
+      efhw_get_evq_reserved_slots(nic, info->efhw_flags);
 
     /* This is a loop to try double allocation. If it fails initialy an attempt
      * is made to find and release orphaned stack and try allocation again.  */
@@ -1837,7 +1841,8 @@ static int initialise_vi(ci_netif* ni, struct ef_vi* vi, struct efrm_vi* vi_rs,
   ef_vi_init_out_flags( vi, *vi_out_flags);
   ef_vi_init_io(vi, vm->io_page);
   ef_vi_init_timer(vi, vm->timer_quantum_ns);
-  ef_vi_init_evq(vi, vm->evq_size, vm->evq_base);
+  ef_vi_init_evq(vi, vm->evq_size, vm->evq_base,
+                 vm->evq_size - alloc_info->evq_reserved_events);
   if( vm->rxq_size > 0 ) {
     ef_vi_init_rxq(vi, vm->rxq_size, vm->rxq_descriptors, vi_ids,
                    vm->rxq_prefix_len);
@@ -2046,7 +2051,7 @@ static int allocate_vis(tcp_helper_resource_t* trs,
     nsn->pd_owner = efrm_pd_owner_id(alloc_info.pd);
 
     alloc_info.virs = &trs_nic->thn_vi_rs;
-    rc = allocate_vi(ni, &alloc_info);
+    rc = allocate_vi(ni, &alloc_info, nic);
     if( rc != 0 )
       goto error_out;
 
@@ -2096,6 +2101,7 @@ static int allocate_vis(tcp_helper_resource_t* trs,
     nsn->vi_flags = alloc_info.ef_vi_flags;
     nsn->vi_out_flags = vi_out_flags;
     nsn->vi_evq_bytes = efrm_vi_rm_evq_bytes(vi_rs, -1);
+    nsn->vi_evq_reserved_slots = alloc_info.evq_reserved_events;
     nsn->vi_rxq_size = vm->rxq_size;
     nsn->vi_txq_size = vm->txq_size;
     nsn->timer_quantum_ns = vm->timer_quantum_ns;

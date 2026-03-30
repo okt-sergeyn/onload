@@ -823,6 +823,8 @@ typedef struct {
   uint32_t      unsol_credit_seq;
   /** Time synchronization flags */
   uint32_t      sync_flags;
+  /** Lower bound on the number of unused EVQ slots */
+  int32_t       min_unused_evq_slots;
 } ef_eventq_state;
 
 /*! \brief TX descriptor ring
@@ -1188,6 +1190,10 @@ typedef struct ef_vi {
   char*                         evq_base;
   /** Mask for offsets within the event queue for the virtual interface */
   unsigned                      evq_mask;
+  /** The maximum number of events that a user of this VI can generate,
+  ** this will be the capacity subtract any reservation such as for
+  ** time sync events. */
+  unsigned                      evq_max_events;
   /** True if the event queue uses phase bits */
   int                           evq_phase_bits;
   /** The timer quantum for the virtual interface, in nanoseconds */

@@ -986,6 +986,7 @@ typedef struct {
   CI_ULCONST ci_uint32  vi_io_mmap_bytes;
   CI_ULCONST ci_uint32  vi_efct_shm_mmap_bytes;
   CI_ULCONST ci_uint32  vi_evq_bytes;
+  CI_ULCONST ci_uint16  vi_evq_reserved_slots;
   CI_ULCONST ci_uint16  vi_instance;
   CI_ULCONST ci_uint16  vi_rxq_size;
   CI_ULCONST ci_uint16  vi_txq_size;

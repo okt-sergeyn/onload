@@ -256,6 +256,7 @@ typedef struct oo_p_dllink oo_p_dllink_t;
   ) \
   FTL_TFIELD_CONSTINT(ctx, ci_uint32, vi_io_mmap_bytes, ORM_OUTPUT_STACK) \
   FTL_TFIELD_CONSTINT(ctx, ci_uint32, vi_evq_bytes, ORM_OUTPUT_STACK) \
+  FTL_TFIELD_CONSTINT(ctx, ci_uint16, vi_evq_reserved_slots, ORM_OUTPUT_STACK) \
   FTL_TFIELD_CONSTINT(ctx, ci_uint16, vi_instance, ORM_OUTPUT_STACK) \
   FTL_TFIELD_CONSTINT(ctx, ci_uint16, vi_rxq_size, ORM_OUTPUT_STACK) \
   FTL_TFIELD_CONSTINT(ctx, ci_uint16, vi_txq_size, ORM_OUTPUT_STACK) \
