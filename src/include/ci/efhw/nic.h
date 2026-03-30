@@ -93,4 +93,7 @@ static inline uint8_t efhw_vi_nic_flags(const struct efhw_nic* nic)
 extern bool efhw_nic_phys_contig_queue(struct efhw_nic *nic,
 				       enum efhw_q_type type);
 
+extern unsigned
+efhw_get_evq_reserved_slots(struct efhw_nic *nic, unsigned vi_flags);
+
 #endif /* __CI_EFHW_NIC_H__ */

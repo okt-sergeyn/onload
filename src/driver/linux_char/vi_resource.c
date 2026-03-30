@@ -101,6 +101,7 @@ vi_resource_alloc(struct efrm_vi_attr *attr,
                   int tx_q_tag, int rx_q_tag,
                   struct efrm_vi **virs_out)
 {
+  unsigned evq_reservation;
   struct efhw_nic *nic;
   struct efrm_vi *virs;
   int rc;
@@ -139,16 +140,22 @@ vi_resource_alloc(struct efrm_vi_attr *attr,
     goto fail_q_alloc;
   }
 
+  /* We take one less than the actual reserved amount here to maintain the old
+   * queue sizing behaviour. */
+  evq_reservation = efhw_get_evq_reserved_slots(nic, vi_flags) - 1;
+
+  /* evq_capacity < 0 indicates an extra reservation, with the reserved amount
+   * being "0 reserved slots" at evq_capacity = -1. */
+  if( evq_capacity < 0 )
+    evq_reservation += -evq_capacity - 1;
+
   /* Size EVQ sensibly based on RX and TX Q sizes */
   if (evq_virs == NULL && evq_capacity < 0) {
     if (vi_flags & EFHW_VI_RX_PACKED_STREAM) {
       evq_capacity = 32 * 1024;
     }
     else if( nic->flags & NIC_FLAG_RX_SHARED ) {
-      /* evq_capacity<0 indicates an additional reserve. See below. */
-      evq_capacity = txq_capacity - evq_capacity - 1;
-      if (vi_flags & EFHW_VI_TX_TIMESTAMPS)
-        evq_capacity += CI_CFG_TIME_SYNC_EVENT_EVQ_CAPACITY;
+      evq_capacity = txq_capacity + evq_reservation;
     }
     else if (vi_flags & (EFHW_VI_TX_TIMESTAMPS | EFHW_VI_TX_ALT)) {
       if (txq_capacity == 0) {
@@ -159,19 +166,10 @@ vi_resource_alloc(struct efrm_vi_attr *attr,
        * Take into account additional capacity to reserve as indicated by
        * evq_capacity.
        */
-      evq_capacity = rxq_capacity + 3 * txq_capacity - evq_capacity - 1;
-
-      /* Reserve space for time sync events. */
-      if( vi_flags & (EFHW_VI_TX_TIMESTAMPS | EFHW_VI_RX_TIMESTAMPS) )
-        evq_capacity += CI_CFG_TIME_SYNC_EVENT_EVQ_CAPACITY;
-    }
-    else if (vi_flags & EFHW_VI_RX_TIMESTAMPS) {
-      evq_capacity = rxq_capacity + txq_capacity - evq_capacity - 1;
-      /* Reserve space for time sync events. */
-      evq_capacity += CI_CFG_TIME_SYNC_EVENT_EVQ_CAPACITY;
+      evq_capacity = rxq_capacity + 3 * txq_capacity + evq_reservation;
     }
     else {
-      evq_capacity = rxq_capacity + txq_capacity - evq_capacity - 1;
+      evq_capacity = rxq_capacity + txq_capacity + evq_reservation;
     }
     if (evq_capacity == 0)
       evq_capacity = -1;
