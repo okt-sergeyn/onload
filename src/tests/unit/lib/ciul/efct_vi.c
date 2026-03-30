@@ -190,7 +190,8 @@ static int efct_mock_next(ef_vi* vi, int qid, bool* sentinel, unsigned* seq)
   ops->next_qid = qid;
 
   if( sbid >= 0 ) {
-    if( rxq_state->n_evq_rx_pkts < required_evq_slots )
+    if( rxq_state->n_evq_rx_pkts < required_evq_slots ||
+        ! ef_vi_consume_evq_slots(vi, required_evq_slots) )
       return -EAGAIN;
 
     rxq_state->n_evq_rx_pkts -= required_evq_slots;
@@ -332,6 +333,7 @@ static struct efct_test* efct_test_init_test(int q_max, int arch, int nic_flags)
   STATE_ALLOC(struct efct_mock_ops, mock_ops);
 
   vi->ep_state = &t->ep_state;
+  vi->evq_vi = vi;
   vi->nic_type.arch = arch;
   vi->nic_type.nic_flags = nic_flags;
   assert(efct_vi_init(vi) == 0);
@@ -398,6 +400,8 @@ efct_test_init_tx_default(int q_max, int evq_size, int txq_size, int arch,
   assert(EF_VI_IS_POW2(evq_size));
   t->vi->evq_mask = evq_size * 8 - 1;
   t->vi->evq_base = calloc(evq_size * 8, sizeof(char));
+  t->vi->evq_max_events = evq_size;
+  t->vi->ep_state->evq.min_unused_evq_slots = t->vi->evq_max_events;
   assert(t->vi->evq_base);
 
   /* evq phase should be 1 to begin with, so cheat and just set everything to 1 */

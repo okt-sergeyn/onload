@@ -543,6 +543,7 @@ static void efct_tx_handle_event(ef_vi* vi, ci_qword_t event, ef_event* ev_out,
   if( unlikely(*again) )
     count = EF_VI_TRANSMIT_BATCH;
 
+  ef_vi_return_evq_slots(vi, count);
   while( count-- ) {
     BUG_ON(qs->previous == qs->added);
     qs->ct_removed += desc[qs->previous & q->mask].len;
@@ -613,7 +614,7 @@ static int efct_ef_vi_transmit(ef_vi* vi, ef_addr base, int len,
   struct efct_tx_state tx;
   uint64_t header;
 
-  if( ! efct_tx_check(vi, len) )
+  if( ! efct_tx_check(vi, len) || ! ef_vi_consume_evq_slots(vi, 1) )
     return -EAGAIN;
 
   efct_tx_init(vi, &tx);
@@ -637,7 +638,7 @@ static int efct_ef_vi_transmitv(ef_vi* vi, const ef_iovec* iov, int iov_len,
   for( i = 0; i < iov_len; ++i )
     len += iov[i].iov_len;
 
-  if( ! efct_tx_check(vi, len) )
+  if( ! efct_tx_check(vi, len) || ! ef_vi_consume_evq_slots(vi, 1) )
     return -EAGAIN;
 
   header = efct_tx_pkt_header(vi, len, EFCT_TX_CT_DISABLE);
@@ -722,7 +723,8 @@ static void efct_ef_vi_transmitv_ctpio(ef_vi* vi, size_t len,
 
   /* If we didn't have space then we must report this in _fallback and have
    * another go */
-  vi->last_ctpio_failed = !efct_tx_check(vi, len);
+  vi->last_ctpio_failed = ! efct_tx_check(vi, len) ||
+                          ! ef_vi_consume_evq_slots(vi, 1);
   if(unlikely( vi->last_ctpio_failed ))
     return;
   efct_tx_init(vi, &tx);
@@ -1031,6 +1033,7 @@ static inline int efct_poll_rx(ef_vi* vi, int ix, ef_event* evs, int evs_len)
         ef_vi_efct_rxq_state* rxq_efct_state =
           &vi->ep_state->rxq.efct_state[ix];
         int nskipped;
+        int freed_evq_slots;
         if( next_sb == prev_sb ) {
           /* We created the desc->refcnt assuming that this superbuf would be
            * full of packets. It wasn't, so consume all the unused refs */
@@ -1056,8 +1059,16 @@ static inline int efct_poll_rx(ef_vi* vi, int ix, ef_event* evs, int evs_len)
         /* Uncount partially counted RX events, as if we end up seeing a
          * rollover during RX event processing, we can't quickly work
          * out nskipped so just increment by the entire superbuf. */
-        qs->n_evq_rx_pkts -= (int)rxq_efct_state->generates_events *
-                             (rxq_ptr->superbuf_pkts - nskipped);
+        freed_evq_slots = (int)rxq_efct_state->generates_events *
+                          (rxq_ptr->superbuf_pkts - nskipped);
+        /* It is theoretically possible that we have a smaller EVQ than the
+         * number of TX/RX events we could generate. In which case, we might
+         * have counted some of these RX events in the superbuf here and these
+         * might have been used to send more TX packets or post more RX bufs.
+         * In which case, this can cause the available slots to become negative
+         * until we handle the rollover event in our EVQ. */
+        qs->n_evq_rx_pkts -= freed_evq_slots;
+        ef_vi_consume_evq_slots_unchecked(vi, freed_evq_slots);
 
         EF_VI_ASSERT(nskipped <= desc->refcnt);
         desc->refcnt -= nskipped;
@@ -1116,6 +1127,10 @@ static void efct_tx_handle_error_event(ef_vi* vi, ci_qword_t event,
   /* Pretend our TXQ is full so all transmits until this queue is reinitialised
    * fail and are reported to the caller immediately. */
   qs->ct_added = qs->ct_removed + txq_vi->vi_txq.ct_fifo_bytes;
+
+  /* A TX error event corresponds to a single transmit, for which we would have
+   * taken a credit, so lets give it back. */
+  ef_vi_return_evq_slots(vi, 1);
 
   /* If we get an error event then all that we'll get subsequently for this
    * TXQ is a flush, as the queue will be torn down. That means there's no
@@ -1180,15 +1195,17 @@ static void efct_evq_handle_rx_ev(ef_vi* vi, ci_qword_t event)
    * reduce this value by 1 here to compensate. */
   const uint64_t rollover_pkts = EFCT_RX_SUPERBUF_BYTES / EFCT_PKT_STRIDE - 1;
   ef_vi_rxq_state* rxq_state = &vi->ep_state->rxq;
+  int rollover = CI_QWORD_FIELD(event, EFCT_RX_EVENT_ROLLOVER);
+  int num_pkts = CI_QWORD_FIELD(event, EFCT_RX_EVENT_NUM_PACKETS);
+  int evq_slots = rollover * rollover_pkts + num_pkts;
 
   /* If the hardware rolls over, then just consume an entire superbuf. We don't
    * have access (quickly) to the queue index here, otherwise we could more
    * finely count the packets per RXQ. Instead we depend upon the RX polling to
    * spot a rollover, and reduce any partially counted packets we may have
    * encountered (or will in the future). */
-  rxq_state->n_evq_rx_pkts +=
-    CI_QWORD_FIELD(event, EFCT_RX_EVENT_ROLLOVER) * rollover_pkts +
-    CI_QWORD_FIELD(event, EFCT_RX_EVENT_NUM_PACKETS);
+  rxq_state->n_evq_rx_pkts += evq_slots;
+  ef_vi_return_evq_slots(vi, evq_slots);
 }
 
 int efct_poll_tx(ef_vi* vi, ef_event* evs, int evs_len)

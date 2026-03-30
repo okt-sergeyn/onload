@@ -1216,6 +1216,8 @@ typedef struct ef_vi {
   /** Statistics for the virtual interface */
   ef_vi_stats*                  vi_stats;
 
+  /** The EVQ this VI was created with */
+  struct ef_vi*                 evq_vi;
   /** Virtual queues for the virtual interface */
   struct ef_vi*                 vi_qs[EF_VI_MAX_QS];
   /** Number of virtual queues for the virtual interface */
@@ -2005,7 +2007,8 @@ ef_vi_inline int ef_vi_transmit_fill_level(const ef_vi* vi)
 ef_vi_inline int ef_vi_transmit_space_bytes(const ef_vi* vi)
 {
   ef_vi_txq_state* qs = &vi->ep_state->txq;
-  return vi->vi_txq.ct_fifo_bytes - (qs->ct_added - qs->ct_removed);
+  return vi->evq_vi->ep_state->evq.min_unused_evq_slots > 0 ?
+         vi->vi_txq.ct_fifo_bytes - (qs->ct_added - qs->ct_removed) : 0;
 }
 
 

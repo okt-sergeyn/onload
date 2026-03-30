@@ -141,7 +141,8 @@ static void post_buffers(ef_vi* vi, int ix)
                                       pkts_per_superbuf;
   bool free_list_was_empty = ( state->free_head == -1 );
   bool fifo_was_full = ( state->fifo_count_hw >= limit );
-  bool evq_no_space = ( rxq_state->n_evq_rx_pkts < required_evq_slots );
+  bool evq_no_space = ( rxq_state->n_evq_rx_pkts < required_evq_slots ||
+                        ! ef_vi_can_consume_evq_slots(vi, required_evq_slots) );
 
   /* Make sure rxq_state->n_evq_rx_pkts has enough space to store the maximum
    * number of packets we allow an efct application to have */
@@ -155,7 +156,8 @@ static void post_buffers(ef_vi* vi, int ix)
   );
 
   while( state->free_head != -1 && state->fifo_count_hw < limit &&
-         rxq_state->n_evq_rx_pkts >= required_evq_slots ) {
+         rxq_state->n_evq_rx_pkts >= required_evq_slots &&
+         ef_vi_consume_evq_slots(vi, required_evq_slots) ) {
     int16_t id = state->free_head;
     const ci_qword_t* header = efct_superbuf_access(vi, ix, id);
     struct efct_rx_descriptor* desc = efct_rx_desc_for_sb(vi, ix, id);

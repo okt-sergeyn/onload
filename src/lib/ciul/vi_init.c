@@ -84,6 +84,8 @@ int ef_vi_add_queue(ef_vi* evq_vi, ef_vi* add_vi)
   q_label = evq_vi->vi_qs_n++;
   EF_VI_BUG_ON(evq_vi->vi_qs[q_label] != NULL);
   evq_vi->vi_qs[q_label] = add_vi;
+  EF_VI_BUG_ON(add_vi->evq_vi != NULL);
+  add_vi->evq_vi = evq_vi;
   return q_label;
 }
 
