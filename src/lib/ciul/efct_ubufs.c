@@ -134,11 +134,28 @@ static void poison_superbuf(ef_vi* vi, int ix, int id)
 static void post_buffers(ef_vi* vi, int ix)
 {
   ef_vi_efct_rxq_state* state = &vi->ep_state->rxq.efct_state[ix];
+  ef_vi_rxq_state* rxq_state = &vi->ep_state->rxq;
   unsigned limit = get_ubufs(vi)->nic_fifo_limit;
+  const unsigned pkts_per_superbuf = EFCT_RX_SUPERBUF_BYTES / EFCT_PKT_STRIDE;
+  const unsigned required_evq_slots = (unsigned)state->generates_events *
+                                      pkts_per_superbuf;
   bool free_list_was_empty = ( state->free_head == -1 );
   bool fifo_was_full = ( state->fifo_count_hw >= limit );
+  bool evq_no_space = ( rxq_state->n_evq_rx_pkts < required_evq_slots );
 
-  while( state->free_head != -1 && state->fifo_count_hw < limit ) {
+  /* Make sure rxq_state->n_evq_rx_pkts has enough space to store the maximum
+   * number of packets we allow an efct application to have */
+  EF_VI_BUILD_ASSERT(
+    /* Max number of packets stored in n_evq_rx_pkts */
+    (((1ull << ((8 * sizeof(rxq_state->n_evq_rx_pkts)) - 1)) << 1) | 1)
+    >=
+    /* Max number of packets possible = max rxqs * max pkts per rxq */
+    ((uint64_t)EF_VI_MAX_EFCT_RXQS * CI_EFCT_MAX_SUPERBUFS *
+     (EFCT_RX_SUPERBUF_BYTES / EFCT_PKT_STRIDE) /* pkts_per_superbuf */)
+  );
+
+  while( state->free_head != -1 && state->fifo_count_hw < limit &&
+         rxq_state->n_evq_rx_pkts >= required_evq_slots ) {
     int16_t id = state->free_head;
     const ci_qword_t* header = efct_superbuf_access(vi, ix, id);
     struct efct_rx_descriptor* desc = efct_rx_desc_for_sb(vi, ix, id);
@@ -161,10 +178,17 @@ static void post_buffers(ef_vi* vi, int ix)
     state->fifo_count_hw++;
     state->fifo_count_sw++;
 
+    /* Consume the packets required by the superbuf we just posted. It's worth
+     * noting that this isn't susceptible to a TOCTTOU race condition because
+     * onload will never call ef_eventq_poll on the same VI concurrently. */
+    rxq_state->n_evq_rx_pkts -= required_evq_slots;
+
     vi->efct_rxqs.ops->post(vi, ix, id, desc->sentinel);
     EF10CT_STATS_INC(vi, ix, buffers_posted);
   }
 
+  if ( evq_no_space )
+    EF10CT_STATS_INC(vi, ix, rollover_failed_no_evq_space);
   if ( free_list_was_empty )
     EF10CT_STATS_INC(vi, ix, free_list_empty);
   if ( fifo_was_full )

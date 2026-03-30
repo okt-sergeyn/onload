@@ -176,10 +176,13 @@ static bool efct_mock_available(const ef_vi* vi, int qid)
 
 static int efct_mock_next(ef_vi* vi, int qid, bool* sentinel, unsigned* seq)
 {
+  ef_vi_efct_rxq_state* state = &vi->ep_state->rxq.efct_state[qid];
+  ef_vi_rxq_state* rxq_state = &vi->ep_state->rxq;
   struct efct_mock_ops* ops = mock_ops(vi);
   struct efct_mock_rxq* rxq = &ops->rxqs->q[qid];
   int sbid = get_sbid(rxq);
-
+  unsigned required_evq_slots = (unsigned)state->generates_events *
+                                PKTS_PER_SB;
   char* p;
 
   ops->anything_called += 1;
@@ -187,6 +190,11 @@ static int efct_mock_next(ef_vi* vi, int qid, bool* sentinel, unsigned* seq)
   ops->next_qid = qid;
 
   if( sbid >= 0 ) {
+    if( rxq_state->n_evq_rx_pkts < required_evq_slots )
+      return -EAGAIN;
+
+    rxq_state->n_evq_rx_pkts -= required_evq_slots;
+
     *sentinel = peek_sentinel(rxq, sbid);
     *seq = rxq->next_seq++;
 
@@ -484,7 +492,7 @@ efct_test_get_queues_pending_rollover(struct efct_test* t, int qid,
   *max_pending_qid = -1;
   *n_pending_before_qid = 0;
 
-  assert(*t->vi->efct_rxqs.q[qid].live.superbuf_pkts != 0);
+  assert(qid == -1 || *t->vi->efct_rxqs.q[qid].live.superbuf_pkts != 0);
 
   FOR_EACH_ACTIVE_EFCT_RXQ(t->vi, qs, ix) {
     const ef_vi_efct_rxq_ptr* rxq_ptr = &t->vi->ep_state->rxq.rxq_ptr[ix];
@@ -541,14 +549,9 @@ efct_test_rollover(struct efct_test* t, int qid, int sbid, int sentinel,
     }
 
     CHECK(ef_eventq_poll(t->vi, evs, 1 - (int)pending_packets), ==, 0);
-    if( ! generates_events || n_evq_rx_pkts >= PKTS_PER_SB ) {
-      STATE_CHECK(t->mock_ops, anything_called, pending_qs);
-      STATE_CHECK(t->mock_ops, next_called, pending_qs);
-      STATE_CHECK(t->mock_ops, next_qid, max_pending_qid);
-    } else {
-      STATE_CHECK(t->mock_ops, anything_called, 0);
-      STATE_CHECK(t->mock_ops, next_called, 0);
-    }
+    STATE_CHECK(t->mock_ops, anything_called, pending_qs);
+    STATE_CHECK(t->mock_ops, next_called, pending_qs);
+    STATE_CHECK(t->mock_ops, next_qid, max_pending_qid);
 
     /* We shouldn't have rolled over, and thus shouldn't have consumed any
      * packets. Likewise if we had no packets in the first place. */
@@ -576,16 +579,16 @@ efct_test_rollover(struct efct_test* t, int qid, int sbid, int sentinel,
    * are available to allow for a rollover. */
   CHECK(ef_eventq_poll(t->vi, evs, 1 - (int)pending_packets), ==, 0);
   if( generates_events && n_evq_rx_pkts < PKTS_PER_SB ) {
-    STATE_CHECK(t->mock_ops, anything_called, 0);
-    STATE_CHECK(t->mock_ops, next_called, 0);
+    STATE_CHECK(t->mock_ops, anything_called, pending_qs);
+    STATE_CHECK(t->mock_ops, next_called, pending_qs);
     CHECK(n_evq_rx_pkts, ==, t->vi->ep_state->rxq.n_evq_rx_pkts);
     CHECK(expect_rollover, ==, false);
   } else {
     /* Don't support checking multiple rollovers in a single poll for now */
     assert(!generates_events || n_evq_rx_pkts / PKTS_PER_SB == 1);
-    STATE_CHECK(t->mock_ops, anything_called, 1 + n_pending_before_qid);
-    STATE_CHECK(t->mock_ops, next_called, 1 + n_pending_before_qid);
-    STATE_CHECK(t->mock_ops, next_qid, qid);
+    STATE_CHECK(t->mock_ops, anything_called, pending_qs);
+    STATE_CHECK(t->mock_ops, next_called, pending_qs);
+    STATE_CHECK(t->mock_ops, next_qid, max_pending_qid);
     CHECK(expect_rollover, ==, true);
     /* We should consume a superbuf worth of packets if we rollover */
     CHECK(n_evq_rx_pkts - (generates_events * PKTS_PER_SB), ==,
@@ -616,8 +619,8 @@ efct_test_rollover(struct efct_test* t, int qid, int sbid, int sentinel,
 
       assert(t->vi->ep_state->rxq.n_evq_rx_pkts < PKTS_PER_SB);
       CHECK(ef_eventq_poll(t->vi, evs, 1 - (int)pending_packets), ==, 0);
-      STATE_CHECK(t->mock_ops, anything_called, 0);
-      STATE_CHECK(t->mock_ops, next_called, 0);
+      STATE_CHECK(t->mock_ops, anything_called, pending_qs);
+      STATE_CHECK(t->mock_ops, next_called, pending_qs);
     }
   }
 }
@@ -1721,30 +1724,56 @@ static void test_efct_polling_rx_evs_evq_overflow(void)
 
   /* Consume all of the RX packets by directly looking into the superbuf */
   for( rxq = 0; rxq < n_rxqs; rxq++ ) {
-    int remaining;
+    int remaining, polls = 0;
+    int n_pending_before_qid = 0;
+    int min_pending_qid = 0;
+    int max_pending_qid = 0;
+    int pending_qs = 0;
 
-    for( i = 0; i < max_rx_pkts / 16; i++ )
+    efct_test_get_queues_pending_rollover(t, rxq, &pending_qs,
+                                          &min_pending_qid,
+                                          &max_pending_qid,
+                                          &n_pending_before_qid);
+
+    for( i = 0; i < max_rx_pkts / 16; i++, polls++ )
       efct_test_rx_poll(t, rxq, 16, 16);
 
     remaining = max_rx_pkts - i * 16;
-    if( remaining )
+    if( remaining ) {
       efct_test_rx_poll(t, rxq, remaining, remaining);
+      polls++;
+    }
 
     /* If the meta offset is in another superbuf, then we need to poll the last
      * packet there */
 
     if( meta_offset == 0 ) {
-      STATE_CHECK(t->mock_ops, anything_called, 1);
+      STATE_CHECK(t->mock_ops, anything_called, 1 + pending_qs * polls);
       STATE_CHECK(t->mock_ops, free_called, 1);
       STATE_CHECK(t->mock_ops, free_qid, rxq);
       STATE_CHECK(t->mock_ops, free_sbid, 0);
+    } else {
+      STATE_CHECK(t->mock_ops, anything_called, pending_qs * polls);
     }
+    STATE_CHECK(t->mock_ops, next_called, pending_qs * polls);
   }
 
   /* Eat up all the TX events in the TX EVQ */
   for( i = 0; i < max_tx_pkts - n_rxqs; i++ ) {
+    int n_pending_before_qid = 0;
+    int min_pending_qid = 0;
+    int max_pending_qid = 0;
+    int pending_qs = 0;
+
+    efct_test_get_queues_pending_rollover(t, -1, &pending_qs,
+                                          &min_pending_qid,
+                                          &max_pending_qid,
+                                          &n_pending_before_qid);
+
     CHECK(ef_eventq_poll(t->vi, evs, 1), ==, 1);
     efct_test_handle_tx_event(t, &evs[0], 1);
+    STATE_CHECK(t->mock_ops, next_called, pending_qs);
+    STATE_CHECK(t->mock_ops, anything_called, pending_qs);
   }
 
   /* Next time we poll, we shouldn't end up calling `next` because RX polling
@@ -1760,14 +1789,33 @@ static void test_efct_polling_rx_evs_evq_overflow(void)
    * long as we can rely on other buffers being consumed and letting us steal
    * their final packet. */
   if( meta_offset == 1 ) {
+    int n_pending_before_qid = 0;
+    int min_pending_qid = 0;
+    int max_pending_qid = 0;
+    int pending_qs = 0;
+
+    efct_test_get_queues_pending_rollover(t, -1, &pending_qs,
+                                          &min_pending_qid,
+                                          &max_pending_qid,
+                                          &n_pending_before_qid);
+
     CHECK(ef_eventq_poll(t->vi, evs, 1), ==, 1);
     efct_test_handle_tx_event(t, &evs[0], 1);
+    STATE_CHECK(t->mock_ops, next_called, pending_qs);
+    STATE_CHECK(t->mock_ops, anything_called, pending_qs);
 
     for( rxq = 0; rxq < n_rxqs - 1; rxq++ ) {
       int n_evq_rx_pkts = t->vi->ep_state->rxq.n_evq_rx_pkts;
 
+      efct_test_get_queues_pending_rollover(t, -1, &pending_qs,
+                                            &min_pending_qid,
+                                            &max_pending_qid,
+                                            &n_pending_before_qid);
+
       CHECK(ef_eventq_poll(t->vi, evs, 1), ==, 1);
       efct_test_handle_tx_event(t, &evs[0], 1);
+      STATE_CHECK(t->mock_ops, next_called, pending_qs);
+      STATE_CHECK(t->mock_ops, anything_called, pending_qs);
       CHECK(t->vi->ep_state->rxq.n_evq_rx_pkts, ==, n_evq_rx_pkts + max_rx_pkts);
       CHECK(t->vi->ep_state->rxq.n_evq_rx_pkts, >=, PKTS_PER_SB);
       CHECK(t->vi->ep_state->rxq.n_evq_rx_pkts, <, 2 * PKTS_PER_SB);
@@ -1775,10 +1823,17 @@ static void test_efct_polling_rx_evs_evq_overflow(void)
       efct_test_rollover(t, rxq, 1, 1, true, rxq == 0);
     }
 
+    efct_test_get_queues_pending_rollover(t, -1, &pending_qs,
+                                          &min_pending_qid,
+                                          &max_pending_qid,
+                                          &n_pending_before_qid);
+
     /* The final superbuf won't be allowed to rollover because the other RXQs
      * have "stolen" it's packet. */
     CHECK(ef_eventq_poll(t->vi, evs, 1), ==, 0);
     CHECK(t->vi->ep_state->rxq.n_evq_rx_pkts, ==, PKTS_PER_SB - n_rxqs);
+    STATE_CHECK(t->mock_ops, next_called, pending_qs);
+    STATE_CHECK(t->mock_ops, anything_called, pending_qs);
     efct_test_rollover(t, rxq, 1, 1, false, false);
 
     /* RX enough packets to rxq0 to allow the last rxq to rollover */
@@ -1787,7 +1842,8 @@ static void test_efct_polling_rx_evs_evq_overflow(void)
       efct_test_rx_complete(t, 0, 1);
     }
     efct_test_rx_poll(t, 0, n_rxqs, 16);
-    STATE_CHECK(t->mock_ops, anything_called, 1);
+    STATE_CHECK(t->mock_ops, anything_called, 1 + pending_qs);
+    STATE_CHECK(t->mock_ops, next_called, pending_qs);
     STATE_CHECK(t->mock_ops, free_called, 1);
     STATE_CHECK(t->mock_ops, free_qid, 0);
     STATE_CHECK(t->mock_ops, free_sbid, 0);
@@ -1807,9 +1863,20 @@ static void test_efct_polling_rx_evs_evq_overflow(void)
   } else {
     for( rxq = 0; rxq < n_rxqs; rxq++ ) {
       int n_evq_rx_pkts = t->vi->ep_state->rxq.n_evq_rx_pkts;
+      int n_pending_before_qid = 0;
+      int min_pending_qid = 0;
+      int max_pending_qid = 0;
+      int pending_qs = 0;
+
+      efct_test_get_queues_pending_rollover(t, -1, &pending_qs,
+                                            &min_pending_qid,
+                                            &max_pending_qid,
+                                            &n_pending_before_qid);
 
       CHECK(ef_eventq_poll(t->vi, evs, 1), ==, 1);
       efct_test_handle_tx_event(t, &evs[0], 1);
+      STATE_CHECK(t->mock_ops, anything_called, pending_qs);
+      STATE_CHECK(t->mock_ops, next_called, pending_qs);
       CHECK(t->vi->ep_state->rxq.n_evq_rx_pkts, ==, n_evq_rx_pkts + max_rx_pkts);
       CHECK(t->vi->ep_state->rxq.n_evq_rx_pkts, >=, PKTS_PER_SB);
       CHECK(t->vi->ep_state->rxq.n_evq_rx_pkts, <, 2 * PKTS_PER_SB);
@@ -1859,6 +1926,8 @@ static void test_efct_polling_rx_evs_evq_overflow(void)
    * to rollover properly. */
   efct_test_rx_rollover_ev(t, rxq);
   CHECK(ef_eventq_poll(t->vi, evs, 1), ==, 0);
+  STATE_CHECK(t->mock_ops, anything_called, 1);
+  STATE_CHECK(t->mock_ops, next_called, 1);
   CHECK(t->vi->ep_state->rxq.n_evq_rx_pkts, ==, other_q_pkts + PKTS_PER_SB);
   efct_test_rollover(t, rxq, 2, 1, true, false);
 

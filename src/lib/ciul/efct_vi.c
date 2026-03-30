@@ -50,12 +50,6 @@
   ((((q)->ep_state->evq.evq_ptr + sizeof(ef_vi_qword) * (i)) &    \
     ((q)->evq_mask + 1)) != 0)
 
-#define EFCT_RXQ_STAT_INC(vi, ix, counter) \
-  do { \
-    if ((vi)->vi_stats) \
-      (vi)->vi_stats->efct_rxq_stats[ix].counter++; \
-  } while(0)
-
 static int efct_ef_eventq_has_many_events(const ef_vi* vi, int n_events)
 {
   ef_vi_qword* ev;
@@ -878,44 +872,16 @@ static void efct_ef_vi_receive_push(ef_vi* vi)
 
 static int rx_rollover(ef_vi* vi, int qix)
 {
-  const uint64_t pkts_per_superbuf = EFCT_RX_SUPERBUF_BYTES / EFCT_PKT_STRIDE;
   uint32_t meta_pkt;
   ef_vi_efct_rxq_ptr* rxq_ptr = &vi->ep_state->rxq.rxq_ptr[qix];
-  ef_vi_efct_rxq_state* rxq_efct_state = &vi->ep_state->rxq.efct_state[qix];
-  ef_vi_rxq_state* rxq_state = &vi->ep_state->rxq;
   unsigned sbseq;
   bool sentinel;
   struct efct_rx_descriptor* desc;
   int rc;
 
-  /* Make sure rxq_state->n_evq_rx_pkts has enough space to store the maximum
-   * number of packets we allow an efct application to have */
-  EF_VI_BUILD_ASSERT(
-    /* Max number of packets stored in n_evq_rx_pkts */
-    (((1ull << ((8 * sizeof(rxq_state->n_evq_rx_pkts)) - 1)) << 1) | 1)
-    >=
-    /* Max number of packets possible = max rxqs * max pkts per rxq */
-    ((uint64_t)EF_VI_MAX_EFCT_RXQS * CI_EFCT_MAX_SUPERBUFS *
-     (EFCT_RX_SUPERBUF_BYTES / EFCT_PKT_STRIDE) /* pkts_per_superbuf */)
-  );
-
-  /* If this RXQ generates events, then we must make sure our EVQ has space to
-   * handle enough events for this superbuf. */
-  if( rxq_efct_state->generates_events &&
-      rxq_state->n_evq_rx_pkts < pkts_per_superbuf ) {
-    EFCT_RXQ_STAT_INC(vi, qix, rollover_failed_no_evq_space);
-    return -EAGAIN;
-  }
-
   rc = vi->efct_rxqs.ops->next(vi, qix, &sentinel, &sbseq);
   if( rc < 0 )
     return rc;
-
-  /* Consume the packets required by the superbuf we just posted. It's worth
-   * noting that this isn't susceptible to a TOCTTOU race condition because
-   * onload will never call ef_eventq_poll on the same VI concurrently.*/
-  rxq_state->n_evq_rx_pkts -= (int)rxq_efct_state->generates_events *
-                              pkts_per_superbuf;
 
   meta_pkt = make_pkt_id(qix, rc, 0);
 
