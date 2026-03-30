@@ -1067,7 +1067,6 @@ static inline int efct_poll_rx(ef_vi* vi, int ix, ef_event* evs, int evs_len)
          * might have been used to send more TX packets or post more RX bufs.
          * In which case, this can cause the available slots to become negative
          * until we handle the rollover event in our EVQ. */
-        qs->n_evq_rx_pkts -= freed_evq_slots;
         ef_vi_consume_evq_slots_unchecked(vi, freed_evq_slots);
 
         EF_VI_ASSERT(nskipped <= desc->refcnt);
@@ -1194,7 +1193,6 @@ static void efct_evq_handle_rx_ev(ef_vi* vi, ci_qword_t event)
    * rollover events also set the number of packets in the event to 1, so we
    * reduce this value by 1 here to compensate. */
   const uint64_t rollover_pkts = EFCT_RX_SUPERBUF_BYTES / EFCT_PKT_STRIDE - 1;
-  ef_vi_rxq_state* rxq_state = &vi->ep_state->rxq;
   int rollover = CI_QWORD_FIELD(event, EFCT_RX_EVENT_ROLLOVER);
   int num_pkts = CI_QWORD_FIELD(event, EFCT_RX_EVENT_NUM_PACKETS);
   int evq_slots = rollover * rollover_pkts + num_pkts;
@@ -1204,7 +1202,6 @@ static void efct_evq_handle_rx_ev(ef_vi* vi, ci_qword_t event)
    * finely count the packets per RXQ. Instead we depend upon the RX polling to
    * spot a rollover, and reduce any partially counted packets we may have
    * encountered (or will in the future). */
-  rxq_state->n_evq_rx_pkts += evq_slots;
   ef_vi_return_evq_slots(vi, evq_slots);
 }
 
