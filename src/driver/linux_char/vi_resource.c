@@ -98,7 +98,7 @@ vi_resource_alloc(struct efrm_vi_attr *attr,
                   struct efrm_vi *evq_virs,
                   unsigned vi_flags,
                   int evq_capacity, int txq_capacity, int rxq_capacity,
-                  int tx_q_tag, int rx_q_tag,
+                  int tx_q_tag, int rx_q_tag, unsigned *evq_reservation_out,
                   struct efrm_vi **virs_out)
 {
   unsigned evq_reservation;
@@ -201,6 +201,9 @@ vi_resource_alloc(struct efrm_vi_attr *attr,
   if (!virs->ep_state)
     goto fail_q_alloc;
 
+  /* We store one less than the actual reservation, so make sure we return the
+   * actual reserved amount. */
+  *evq_reservation_out = evq_reservation + 1;
   *virs_out = virs;
   return 0;
 
@@ -245,6 +248,7 @@ efch_vi_rm_alloc(ci_resource_alloc_t* alloc, ci_resource_table_t* rt,
   struct efrm_resource *vi_set = NULL;
   struct efrm_resource *evq = NULL;
   struct efrm_resource *pd = NULL;
+  unsigned evq_reservation = 0;
   struct efrm_client *client;
   struct efrm_vi *virs = NULL;
   struct efrm_vi_attr attr;
@@ -326,7 +330,7 @@ efch_vi_rm_alloc(ci_resource_alloc_t* alloc, ci_resource_table_t* rt,
                          alloc_in->evq_capacity,
                          alloc_in->txq_capacity, alloc_in->rxq_capacity,
                          alloc_in->tx_q_tag, alloc_in->rx_q_tag,
-                         &virs);
+                         &evq_reservation, &virs);
   CI_DEBUG(alloc_in = NULL);
   if( client != NULL )
     efrm_client_put(client);
@@ -344,6 +348,15 @@ efch_vi_rm_alloc(ci_resource_alloc_t* alloc, ci_resource_table_t* rt,
   }
   if (rc != 0)
     goto fail3;
+
+  /* If we allocated an EVQ, then we must have allocated one large enough
+   * to actually fill it with events that we want instead of having every
+   * slot reserved. */
+  if (virs->q[EFHW_EVQ].capacity != 0 &&
+      evq_reservation >= virs->q[EFHW_EVQ].capacity) {
+    rc = -ENOSPC;
+    goto fail4;
+  }
 
   efch_filter_list_init(&rs->vi.fl);
   rs->vi.sniff_flags = 0;
@@ -373,6 +386,9 @@ efch_vi_rm_alloc(ci_resource_alloc_t* alloc, ci_resource_table_t* rt,
   alloc_out->out_flags = virs->out_flags;
   alloc_out->out_flags |= EFHW_VI_PS_BUF_SIZE_SET;
   alloc_out->ps_buf_size = virs->ps_buf_size;
+  /* We make sure we have number of events >0 above, otherwise the user could
+   * not really do anything with this VI. */
+  alloc_out->evq_max_user_events = alloc_out->evq_capacity - evq_reservation;
 
   EFCH_TRACE("%s: Allocated "EFRM_RESOURCE_FMT" rc=%d", __FUNCTION__,
              EFRM_RESOURCE_PRI_ARG(&virs->rs), rc);
