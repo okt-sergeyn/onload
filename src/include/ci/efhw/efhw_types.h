@@ -573,6 +573,9 @@ struct efhw_func_ops {
 	 * all of them. */
 	size_t (*max_shared_rxqs)(struct efhw_nic* nic);
 
+	/*! Architecture specific number of reserved slots in an EVQ. */
+	uint32_t (*evq_reserved_slots)(struct efhw_nic* nic);
+
   /*-------------- pio ------------------------ */
 
 	/*! Allocate a piobuf */

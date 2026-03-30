@@ -140,6 +140,10 @@
 	((nic)->efhw_func->max_shared_rxqs ? \
 	 (nic)->efhw_func->max_shared_rxqs((nic)) : 0)
 
+#define efhw_nic_evq_reserved_slots(nic) \
+	((nic)->efhw_func->evq_reserved_slots ? \
+	 (nic)->efhw_func->evq_reserved_slots((nic)) : 1)
+
 #define efhw_nic_queue_map_type(nic) \
 	((nic)->efhw_func->queue_map_type ? \
 	 (nic)->efhw_func->queue_map_type((nic)) : EFHW_PAGE_MAP_DMA)
