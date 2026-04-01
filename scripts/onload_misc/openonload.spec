@@ -531,7 +531,6 @@ rm -fR $RPM_BUILD_ROOT
 %{python3_sitelib}/sfc*.py
 %{python3_sitelib}/__pycache__/sfc*.pyc
 %{python3_sitelib}/*Onload*.egg-info
-%{python_sitearch}/solar_clusterd/
 %endif
 
 %changelog

@@ -183,41 +183,6 @@ install_slib() {
 }
 
 
-install_solar_clusterd() {
-  local clusterd_lib="$u64/tools/solar_clusterd/cluster_protocol.so"
-  local python_cmd
-  local python_sitelib
-
-  python_cmd="from distutils.sysconfig import get_python_lib; import sys; "
-  python_cmd="$python_cmd sys.stdout.write(get_python_lib(plat_specific=1))"
-  python_sitelib=$(python3 -c "$python_cmd" 2> /dev/null)
-
-  if [ $? != 0 ]; then
-    log "WARNING: solar_clusterd will not be installed as python" \
-        "site-packages location could not be determined." \
-        "(If using SLES10 you need the 'python-devel' package)"
-  elif [ ! -e "$clusterd_lib" ]; then
-    log "Not installing solar_clusterd because it has not been built."
-  else
-    try $do mkdir -p "$i_prefix/$python_sitelib/solar_clusterd"
-
-    # Install built python extension module
-    install_dlib "$clusterd_lib" "$i_prefix/$python_sitelib/solar_clusterd"
-
-    # Install solar_clusterd script and all python files from source folder
-    try $docd "$TOP/src/tools/solar_clusterd" > /dev/null
-
-    install_x solar_clusterd "$i_usrbin/solar_clusterd"
-
-    /bin/ls *.py |
-      while read -r f; do
-        install_f "$f" "$i_prefix/$python_sitelib/solar_clusterd"
-      done;
-
-    try $docd - > /dev/null
-  fi
-}
-
 ######################################################################
 
 install_uninstall() {
@@ -263,7 +228,6 @@ install_userland() {
     install_x "$u64/tools/onload_remote_monitor/orm_json" "$i_usrbin/orm_json"
     install_x "$TOP/src/tools/onload_remote_monitor/orm_webserver" \
               "$i_usrbin/orm_webserver"
-    install_solar_clusterd
   fi
 
   # Install scripts.

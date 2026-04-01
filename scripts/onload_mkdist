@@ -191,8 +191,6 @@ docopy src/tests/onload       hwtimestamping
 
 docopy src/tests/onload/onload_remote_monitor       orm_example_client using_collectd
 
-docopy src/tools              solar_clusterd
-
 docopy src/driver             linux_net
 
 # Remove files we don't want to distribute.
