@@ -2329,7 +2329,6 @@ struct efhw_func_ops ef10ct_char_functional_units = {
   .design_parameters = ef10ct_design_parameters,
   .max_shared_rxqs = ef10ct_max_shared_rxqs,
   .evq_reserved_slots = ef10ct_evq_reserved_slots,
-  .shared_rxq_alloc = ef10ct_shared_rxq_alloc,
   .shared_rxq_bind = ef10ct_shared_rxq_bind,
   .shared_rxq_unbind = ef10ct_shared_rxq_unbind,
   .shared_rxq_refresh = ef10ct_nic_shared_rxq_refresh,
