@@ -8,13 +8,42 @@
 
 #include <errno.h>
 #include <error.h>
+#include <linux/ethtool.h>
 #include <linux/if_link.h>
 #include <linux/limits.h>
+#include <linux/sockios.h>
 #include <net/if.h>
 #include <stdlib.h>
+#include <sys/ioctl.h>
+#include <unistd.h>
 
 #include <bpf/bpf.h>
 #include <bpf/libbpf.h>
+
+static int get_num_rxq(char *ifname)
+{
+	struct ethtool_channels ch = {
+		.cmd = ETHTOOL_GCHANNELS,
+	};
+	struct ifreq ifr = {
+		.ifr_data = (void *)&ch,
+	};
+	int fd, ret;
+
+	strncpy(ifr.ifr_name, ifname, sizeof(ifr.ifr_name));
+
+	fd = socket(AF_UNIX, SOCK_DGRAM, 0);
+	if (fd < 0)
+		error(1, errno, "socket");
+
+	ret = ioctl(fd, SIOCETHTOOL, &ifr);
+	if (ret < 0)
+		error(1, errno, "ioctl SIOCETHTOOL");
+
+	close(fd);
+
+	return ch.rx_count + ch.combined_count;
+}
 
 int main(int argc, char **argv)
 {
@@ -40,6 +69,8 @@ int main(int argc, char **argv)
 	map_xsk = bpf_object__find_map_by_name(obj, "onload_xdp_xsk");
 	if (!map_xsk)
 		error(1, 0, "bpf_object__find_map_by_name onload_xdp_xsk");
+
+	bpf_map__set_max_entries(map_xsk, get_num_rxq(ifname));
 
 	prog = bpf_object__find_program_by_name(obj, "xdp_onload_prog");
 	if (!prog)
