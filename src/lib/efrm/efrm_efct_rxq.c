@@ -262,19 +262,12 @@ int efrm_rxq_alloc(struct efrm_vi *vi, int qid, int shm_ix, bool timestamp_req,
 	if (shm_ix >= 0)
 		params.shm = &vi->efct_shm->q[shm_ix];
 
-	if (qid < 0) {
-		qid = efhw_nic_shared_rxq_alloc(nic);
-		if (qid < 0)
-		  return qid;
-		params.qid = qid;
-	}
-
 	rxq->vi = vi;
 	rc = efhw_nic_shared_rxq_bind(nic, &params);
-	if (rc < 0)
+	if( rc < 0 )
 		goto fail_bind;
 	if( shm_ix >= 0 )
-	  vi->efct_shm->active_qs |= 1ull << shm_ix;
+		vi->efct_shm->active_qs |= 1ull << shm_ix;
 	if( shm_ix < 0 ) {
 		resource_size_t io_addr;
 		rc = efhw_nic_rxq_window(nic, rxq->hw.qid, &io_addr);
@@ -289,7 +282,7 @@ int efrm_rxq_alloc(struct efrm_vi *vi, int qid, int shm_ix, bool timestamp_req,
 	list_add_tail(&rxq->vi_link, &vi->efct_rxq_list);
 	efrm_init_debugfs_efct_rxq(rxq, shm_ix >= 0);
 	*rxq_out = rxq;
-	*qid_out = qid;
+	*qid_out = rxq->hw.qid;
 	return 0;
 
 fail_rxq_window:

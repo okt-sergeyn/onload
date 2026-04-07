@@ -1299,6 +1299,49 @@ ef10ct_rxq_init_mcdi(struct efhw_nic* nic, int q_size, int evq, int rxq_num,
   return ef10ct_fw_rpc(nic, &rpc);
 }
 
+static int ef10ct_shared_rxq_alloc(struct efhw_nic *nic)
+{
+  int rc;
+
+  rc = ef10ct_alloc_rxq(nic);
+
+  /* FIXME ON-16711 full lifetime management of this RXQ. We do the queue init
+   * on demand on first attach, where we have information about the VI user
+   * that we need to make decisions such as whether to enable RX event
+   * generation and the target EVQ. The flush and release happen on queue
+   * detach. There are outstanding bugs to track related work:
+   * - permission handling for additional shared users of the queue
+   * - resource re-allocation post reset
+   */
+
+  /* Update efhw's understanding of the state of this rxq */
+  if( rc >= 0 ) {
+    struct efhw_nic_ef10ct *ef10ct = nic->arch_extra;
+    int rxq_num = ef10ct_get_queue_num(rc);
+
+    mutex_lock(&ef10ct->rxq[rxq_num].bind_lock);
+
+    if( rxq_num < ef10ct->rxq_n ) {
+      if( ef10ct->rxq[rxq_num].state == EF10CT_RXQ_STATE_FREE )
+        ef10ct->rxq[rxq_num].state = EF10CT_RXQ_STATE_ALLOCATED;
+      else
+        EFHW_WARN("%s Allocated rxq %d but it was not in the FREE state."
+                  " state = %u", __func__, rxq_num, ef10ct->rxq[rxq_num].state);
+    }
+
+    mutex_unlock(&ef10ct->rxq[rxq_num].bind_lock);
+
+    /* This needs to use queue number as visible to the upper layers rather
+     * than the MCDI handle, as it's not going straight to the HW but being
+     * used as part of the queue selection process, which operates on host
+     * side handles. */
+    rc = rxq_num;
+  }
+
+  EFHW_TRACE("%s rc %d", __func__, rc);
+  return rc;
+}
+
 static int
 ef10ct_shared_rxq_bind(struct efhw_nic* nic,
                        struct efhw_shared_bind_params *params)
@@ -1318,9 +1361,17 @@ ef10ct_shared_rxq_bind(struct efhw_nic* nic,
   int q_size;
   struct oo_hugetlb_page* pages = NULL;
   bool add_to_wakeup_list = false;
+  bool alloc_hw = rxq_num < 0;
 
   EFHW_TRACE("%s: evq 0x%x, rxq 0x%x", __func__, params->wakeup_instance,
              params->qid);
+
+  if( alloc_hw ) {
+    rc = ef10ct_shared_rxq_alloc(nic);
+    if( rc < 0 )
+      return rc;
+    rxq_num = rc;
+  }
 
   /* Bail out early if we're asked for something we already know is crazy */
   if( rxq_num < 0 || rxq_num >= ef10ct->rxq_n ) {
@@ -1332,6 +1383,9 @@ ef10ct_shared_rxq_bind(struct efhw_nic* nic,
   }
 
   mutex_lock(&ef10ct->rxq[rxq_num].bind_lock);
+
+  rxq_handle = ef10ct_reconstruct_queue_handle(rxq_num,
+                                               EF10CT_QUEUE_HANDLE_TYPE_RXQ);
 
   if( ef10ct->rxq[rxq_num].state == EF10CT_RXQ_STATE_FREEING ||
       ef10ct->rxq[rxq_num].state == EF10CT_RXQ_STATE_FREE ) {
@@ -1354,9 +1408,6 @@ ef10ct_shared_rxq_bind(struct efhw_nic* nic,
     add_to_wakeup_list = true;
     goto out_good;
   }
-
-  rxq_handle = ef10ct_reconstruct_queue_handle(rxq_num,
-                                               EF10CT_QUEUE_HANDLE_TYPE_RXQ);
 
   /* Needs to be done before the queue is active */
   efhw_set_tph_steering(nic, rxq_handle, flag_enable_tph, flag_tph_tag_mode);
@@ -1460,6 +1511,10 @@ fail3:
 fail2:
   kfree(pages);
 fail1:
+  if( alloc_hw ) {
+    ef10ct->rxq[rxq_num].state = EF10CT_RXQ_STATE_FREEING;
+    ef10ct_free_rxq(nic, rxq_handle);
+  }
   mutex_unlock(&ef10ct->rxq[rxq_num].bind_lock);
   return rc;
 }
@@ -1698,50 +1753,6 @@ ef10ct_buffer_map_type(struct efhw_nic *nic)
 struct filter_insert_params {
   struct efhw_nic *nic;
 };
-
-
-static int ef10ct_shared_rxq_alloc(struct efhw_nic *nic)
-{
-  int rc;
-
-  rc = ef10ct_alloc_rxq(nic);
-
-  /* FIXME ON-16711 full lifetime management of this RXQ. We do the queue init
-   * on demand on first attach, where we have information about the VI user
-   * that we need to make decisions such as whether to enable RX event
-   * generation and the target EVQ. The flush and release happen on queue
-   * detach. There are outstanding bugs to track related work:
-   * - permission handling for additional shared users of the queue
-   * - resource re-allocation post reset
-   */
-
-  /* Update efhw's understanding of the state of this rxq */
-  if( rc >= 0 ) {
-    struct efhw_nic_ef10ct *ef10ct = nic->arch_extra;
-    int rxq_num = ef10ct_get_queue_num(rc);
-
-    mutex_lock(&ef10ct->rxq[rxq_num].bind_lock);
-
-    if( rxq_num < ef10ct->rxq_n ) {
-      if( ef10ct->rxq[rxq_num].state == EF10CT_RXQ_STATE_FREE )
-        ef10ct->rxq[rxq_num].state = EF10CT_RXQ_STATE_ALLOCATED;
-      else
-        EFHW_WARN("%s Allocated rxq %d but it was not in the FREE state."
-                  " state = %u", __func__, rxq_num, ef10ct->rxq[rxq_num].state);
-    }
-
-    mutex_unlock(&ef10ct->rxq[rxq_num].bind_lock);
-
-    /* This needs to use queue number as visible to the upper layers rather
-     * than the MCDI handle, as it's not going straight to the HW but being
-     * used as part of the queue selection process, which operates on host
-     * side handles. */
-    rc = rxq_num;
-  }
-
-  EFHW_TRACE("%s rc %d", __func__, rc);
-  return rc;
-}
 
 
 static int select_rxq(struct efhw_nic *nic, int rxq_in, unsigned flags,
