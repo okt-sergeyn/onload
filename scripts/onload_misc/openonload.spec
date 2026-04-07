@@ -106,8 +106,6 @@
 %define debug_package %{nil}
 %endif
 
-%global __python %{__python3}
-
 ###############################################################################
 
 Summary:          OpenOnload user-space
@@ -133,7 +131,7 @@ Requires(pre):    shadow-utils
 %global base_build_requires gawk gcc sed make bash automake libtool autoconf
 BuildRequires:    %{base_build_requires}
 
-%global user_build_requires libpcap-devel libcap-devel python3-devel
+%global user_build_requires libpcap-devel libcap-devel python%{python3_pkgversion}-devel python%{python3_pkgversion}-setuptools
 %if %{with user}
 BuildRequires:    %{user_build_requires}
 %endif
@@ -362,6 +360,7 @@ to build efsend_cplane.
 %prep
 [ "$RPM_BUILD_ROOT" != / ] && rm -rf "$RPM_BUILD_ROOT"
 %setup -q -n %{name}-%{pkgversion}
+sed 's@py_modules@package_dir={"": "scripts"},py_modules@' < scripts/onload_misc/setup.py > setup.py
 
 %build
 %if %{with kmod}
@@ -397,6 +396,9 @@ export HAVE_EFCT=%{?have_efct:%have_efct}
 mkdir build
 %endif
 %endif
+%if %{with user}
+%py3_build
+%endif
 
 %install
 %if %{with user}%{with kmod}%{with devel}%{with examples}
@@ -413,6 +415,7 @@ mkdir -p "$i_prefix/etc/depmod.d"
   %{?have_sdci: --have-sdci}
 %endif
 %if %{with user}
+%py3_install
 # Removing these files is fine since they would only ever be generated on a build machine.
 rm -f "$i_prefix/etc/sysconfig/modules/onload.modules"
 rm -f "$i_prefix/usr/local/lib/modules-load.d/onload.conf"

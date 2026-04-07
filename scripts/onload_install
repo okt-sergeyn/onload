@@ -262,7 +262,10 @@ install_userland() {
   [ -f setup.py ] || try $do cp "$TOP/scripts/onload_misc/setup.py" .
   # Python >= 3.12 requires --single-version-externally-managed to generate egg-info.
   local externally_managed=$(python3 setup.py install --help 2>/dev/null | grep -oF -- "--single-version-externally-managed")
-  if [ "$i_usr" = "/usr" ]; then
+  if $packaged && [ -z "$python_install_layout" ]; then
+    # Let the packaging tools own Python packaging
+    true
+  elif [ "$i_usr" = "/usr" ]; then
     # Debian and Ubuntu mess up if --prefix=/usr is set.
     $do python3 setup.py install --record=$python_manifest \
                                  $python_install_layout $externally_managed
@@ -657,6 +660,7 @@ ppc_at=
 noinitramfs=false
 nosfc=false
 python_install_layout=
+packaged=false
 
 sbindir="/sbin"
 usrdir="/usr"
@@ -695,7 +699,7 @@ while [ $# -gt 0 ]; do
   --modulesloadd) all=false; modulesloadd=true;;
   --udev) all=false; udev=true;;
   --examples) all=false; examples=true;;
-  --packaged) set -x; build=false; sfccheck=false; check_install=false uninstall=false;;
+  --packaged) set -x; packaged=true; build=false; sfccheck=false; check_install=false uninstall=false;;
   --uninstall)  uninstall=true;;
   --nouserfiles) userfiles=false;;
   --noldconfig) ldconfig=false;;
