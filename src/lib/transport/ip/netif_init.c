@@ -1993,7 +1993,8 @@ static int oo_efct_superbuf_config_refresh(ef_vi* vi, int ix)
    * about to start polling the queue. */
   if( rc == 0 &&
       vi->vi_flags & EF_VI_RX_PHYS_ADDR &&
-      vi->efct_rxqs.ops->post != NULL )
+      vi->efct_rxqs.ops->post != NULL &&
+      efct_ubufs_rxq_is_local(vi, ix) )
   {
     void *p;
     rc = oo_resource_mmap(vi->dh, OO_MMAP_TYPE_UBUF_POST,
