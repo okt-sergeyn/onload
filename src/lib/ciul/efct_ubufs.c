@@ -52,7 +52,7 @@ static const struct efct_ubufs* const_ubufs(const ef_vi* vi)
   return CI_CONTAINER(struct efct_ubufs, ops, vi->efct_rxqs.ops);
 }
 
-static bool rxq_is_local(const ef_vi* vi, int ix)
+bool efct_ubufs_rxq_is_local(const ef_vi* vi, int ix)
 {
   return const_ubufs(vi)->q[ix].shrub_client.mappings[0] == 0;
 }
@@ -217,7 +217,7 @@ static int efct_ubufs_next_local(ef_vi* vi, int ix, bool* sentinel, unsigned* sb
 
 static int efct_ubufs_next(ef_vi* vi, int ix, bool* sentinel, unsigned* sbseq)
 {
-  if( rxq_is_local(vi, ix) )
+  if( efct_ubufs_rxq_is_local(vi, ix) )
     return efct_ubufs_next_local(vi, ix, sentinel, sbseq);
   else
     return efct_ubufs_next_shared(vi, ix, sentinel, sbseq);
@@ -252,7 +252,7 @@ static void efct_ubufs_free_shared(ef_vi* vi, int ix, int sbid)
 
 static void efct_ubufs_free(ef_vi* vi, int ix, int sbid)
 {
-  if( rxq_is_local(vi, ix) )
+  if( efct_ubufs_rxq_is_local(vi, ix) )
     efct_ubufs_free_local(vi, ix, sbid);
   else
     efct_ubufs_free_shared(vi, ix, sbid);
@@ -273,7 +273,7 @@ static bool efct_ubufs_shared_available(const ef_vi* vi, int ix)
 
 static bool efct_ubufs_available(const ef_vi* vi, int ix)
 {
-  if( rxq_is_local(vi, ix) )
+  if( efct_ubufs_rxq_is_local(vi, ix) )
     return efct_ubufs_local_available(vi, ix);
   else
     return efct_ubufs_shared_available(vi, ix);
@@ -488,7 +488,7 @@ static void efct_ubufs_detach(ef_vi* vi, int ix)
   eqs->fifo_tail_hw = eqs->fifo_tail_sw = -1;
   eqs->qid = -1;
 
-  if( rxq_is_local(vi, ix) )
+  if( efct_ubufs_rxq_is_local(vi, ix) )
     efct_ubufs_free_rxq_buffers(vi, ix, rxq->rx_post_buffer_reg);
   else
 #ifdef __KERNEL__
