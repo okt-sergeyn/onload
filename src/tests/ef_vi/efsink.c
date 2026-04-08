@@ -779,10 +779,13 @@ int main(int argc, char* argv[])
     }
 
     if ( cfg_exclusive )
-      filter_flags = EF_FILTER_FLAG_EXCLUSIVE_RXQ;
+      filter_flags |= EF_FILTER_FLAG_EXCLUSIVE_RXQ;
 
     if ( cfg_shared )
-      filter_flags = EF_FILTER_FLAG_SHARED_RXQ;
+      filter_flags |= EF_FILTER_FLAG_SHARED_RXQ;
+
+    if ( cfg_eventq_wait || cfg_fd_wait )
+      filter_flags |= EF_FILTER_FLAG_REQUEST_WAKEUPS;
 
     if( filter_parse(&filter_spec, argv[0], &sa_mcast, filter_flags) != 0 ) {
       LOGE("ERROR: Bad filter spec '%s'\n", argv[0]);

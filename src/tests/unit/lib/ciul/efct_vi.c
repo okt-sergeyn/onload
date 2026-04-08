@@ -35,6 +35,7 @@ static const int tx_qid = 0;
 static ci_qword_t last_evq_event = { 0 };
 
 /* Dependencies */
+static ef_filter_spec empty_filter_spec;
 static int test_filter_is_block_only;
 int ef_vi_filter_is_block_only(const struct ef_filter_cookie* cookie)
 {
@@ -624,7 +625,7 @@ efct_test_rollover(struct efct_test* t, int qid, int sbid, int sentinel,
 static void efct_test_attach_only(struct efct_test* t, int qid, bool shared_mode,
                                   int exp_next_calls, int exp_free_calls)
 {
-  CHECK(t->vi->internal_ops.post_filter_add(t->vi, NULL, NULL, qid, shared_mode), ==, 0);
+  CHECK(t->vi->internal_ops.post_filter_add(t->vi, &empty_filter_spec, NULL, qid, shared_mode), ==, 0);
   int exp_anything_called = 1;
   if (shared_mode) {
     exp_anything_called += exp_next_calls + exp_free_calls;
@@ -844,11 +845,11 @@ static void test_efct_attach_local(void)
   bool test_shared_mode = false;
 
   test_filter_is_block_only = true;
-  CHECK(t->vi->internal_ops.post_filter_add(t->vi, NULL, NULL, 1, test_shared_mode), ==, 0);
+  CHECK(t->vi->internal_ops.post_filter_add(t->vi, &empty_filter_spec, NULL, 1, test_shared_mode), ==, 0);
   STATE_CHECK(t->mock_ops, anything_called, 0);
   test_filter_is_block_only = false;
 
-  CHECK(t->vi->internal_ops.post_filter_add(t->vi, NULL, NULL, 3, test_shared_mode), ==, -EINVAL);
+  CHECK(t->vi->internal_ops.post_filter_add(t->vi, &empty_filter_spec, NULL, 3, test_shared_mode), ==, -EINVAL);
   STATE_CHECK(t->mock_ops, anything_called, 1);
   STATE_CHECK(t->mock_ops, attach_called, 1);
   STATE_CHECK(t->mock_ops, attach_qid, 3);
@@ -887,11 +888,11 @@ static void test_efct_attach_shared_helper(int sbids, int pkts)
 
   /* Preserved shrub_client compatablity behavior. */
   test_filter_is_block_only = true;
-  CHECK(t->vi->internal_ops.post_filter_add(t->vi, NULL, NULL, 1, test_shared_mode), ==, 0);
+  CHECK(t->vi->internal_ops.post_filter_add(t->vi, &empty_filter_spec, NULL, 1, test_shared_mode), ==, 0);
   STATE_CHECK(t->mock_ops, anything_called, 0);
   test_filter_is_block_only = false;
 
-  CHECK(t->vi->internal_ops.post_filter_add(t->vi, NULL, NULL, 3, test_shared_mode), ==, -EINVAL);
+  CHECK(t->vi->internal_ops.post_filter_add(t->vi, &empty_filter_spec, NULL, 3, test_shared_mode), ==, -EINVAL);
   STATE_CHECK(t->mock_ops, anything_called, 1);
   STATE_CHECK(t->mock_ops, attach_called, 1);
   STATE_CHECK(t->mock_ops, attach_qid, 3);

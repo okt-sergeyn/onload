@@ -907,7 +907,7 @@ typedef struct {
   /** Post a buffer to the hardware FIFO (called internally) */
   void (*post)(struct ef_vi*, int ix, int sbid, bool sentinel);
   /** To be called before inserting a filter. */
-  int (*pre_attach)(struct ef_vi*, bool shared_mode);
+  int (*pre_attach)(struct ef_vi*, bool shared_mode, bool wants_interrupts);
   /** Attach a queue, allocating a new one if (qid_in < 0) */
   int  (*attach)(struct ef_vi*,
                  int qid_in,
@@ -1339,7 +1339,7 @@ typedef struct ef_vi {
     /** Configure based on hardware design parameters */
     int (*design_parameters)(struct ef_vi*, struct efab_nic_design_parameters*);
     /** A filter is about to be added to the given VI */
-    int (*pre_filter_add)(struct ef_vi*, bool shared_mode);
+    int (*pre_filter_add)(struct ef_vi*, bool shared_mode, bool wants_interrupts);
     /** A filter has just been added to the given VI */
     int (*post_filter_add)(struct ef_vi*, const struct ef_filter_spec* fs,
                            const struct ef_filter_cookie* cookie, int rxq,

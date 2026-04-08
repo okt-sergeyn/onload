@@ -36,6 +36,7 @@ struct efct_ubufs
   ef_driver_handle pd_dh;
   bool is_shrub_filter_info_set;
   bool shrub_use_interrupts;
+  bool is_shrub_controller;
   size_t shrub_max_client_bufs;
   struct efct_ubufs_rxq q[EF_VI_MAX_EFCT_RXQS];
   char server_address[EF_SHRUB_SERVER_SOCKET_LEN];
@@ -301,6 +302,11 @@ void efct_ubufs_set_rxq_io_window(ef_vi* vi, int ix, volatile uint64_t* p)
   get_ubufs(vi)->q[ix].rx_post_buffer_reg = p;
 }
 
+void efct_ubufs_set_is_shrub_controller(ef_vi* vi)
+{
+  get_ubufs(vi)->is_shrub_controller = true;
+}
+
 void efct_ubufs_local_attach_internal(ef_vi* vi, int ix, int qid, unsigned n_superbufs)
 {
   unsigned id;
@@ -361,27 +367,40 @@ int efct_ubufs_get_shared_filter_info(ef_vi* vi, unsigned* token,
   return 0;
 }
 
-static int efct_ubufs_pre_attach(ef_vi* vi, bool shared_mode)
+static int efct_ubufs_pre_attach(ef_vi* vi, bool shared_mode,
+                                 bool wants_interrupts)
 {
   struct efct_ubufs *ubufs = get_ubufs(vi);
   unsigned token;
   bool use_interrupts;
   int rc;
 
-  if( ! shared_mode || ubufs->is_shrub_filter_info_set )
+  if( ! shared_mode )
     return 0;
 
-  rc = efct_ubufs_get_shared_filter_info(vi, &token, &use_interrupts);
-  if( rc < 0 )
-    return rc;
+  if( !ubufs->is_shrub_filter_info_set ) {
+    rc = efct_ubufs_get_shared_filter_info(vi, &token, &use_interrupts);
+    if( rc < 0 )
+      return rc;
 
-  rc = efct_ubufs_set_shared_rxq_token(vi, token);
-  if( rc == 0 ) {
+    rc = efct_ubufs_set_shared_rxq_token(vi, token);
+    if( rc < 0 )
+      return rc;
+
     ubufs->is_shrub_filter_info_set = true;
     ubufs->shrub_use_interrupts = use_interrupts;
   }
 
-  return rc;
+  /* This is a convenient early fail point if a client has asked for an invalid
+   * configuration, allowing us to bail out before we get as far as the actual
+   * filter install which would leave us with an allocated RXQ to clean up. */
+  if( wants_interrupts && !ubufs->shrub_use_interrupts ) {
+    ef_log("%s: Error: shrub controller must be configured to use interrupts "
+           "to allow clients to use interrupts", __FUNCTION__);
+    return -EINVAL;
+  }
+
+  return 0;
 }
 
 static int efct_ubufs_attach(ef_vi* vi,
@@ -410,8 +429,11 @@ static int efct_ubufs_attach(ef_vi* vi,
 
   /* For ef_vi shrub clients the interrupt mode is currently decided solely by the
    * controller configuration. */
-  if( shared_mode )
+  if( shared_mode ) {
+    /* We should have checked this in the pre-attach phase */
+    EF_VI_ASSERT(!use_interrupts || ubufs->shrub_use_interrupts);
     use_interrupts = ubufs->shrub_use_interrupts;
+  }
 
   rc = efct_ubufs_init_rxq_resource(vi, qid, n_superbufs, use_interrupts,
                                     &rxq->rxq_id);
@@ -494,8 +516,33 @@ static efch_resource_id_t efct_ubufs_get_rxq_resource_id(ef_vi* vi, int ix)
 static int efct_ubufs_get_wakeup_params(ef_vi* vi, int qix, unsigned* sbseq,
                                         unsigned* pktix)
 {
-  /* TODO */
-  return -EOPNOTSUPP;
+  ef_vi_efct_rxq_ptr* rxq_ptr = &vi->ep_state->rxq.rxq_ptr[qix];
+  uint64_t sb;
+  uint64_t hw;
+
+  if( ! (vi->ep_state->rxq.efct_active_qs & (1 << qix)) )
+    return -ENOENT;
+
+  if( ! get_ubufs(vi)->is_shrub_controller ) {
+    /* Exclusive queues and shared clients use per-packet wakeup params. */
+    return efct_vi_get_pkt_wakeup_params(vi, qix, sbseq, pktix);
+  }
+
+  /* Shrub controller: we want to wake when the next superbuf becomes
+   * available for the controller to hand out. The SW FIFO is consumed
+   * eagerly (buffers are handed to clients before the NIC fills them),
+   * so state->sbseq tracks how many superbufs have been consumed, which
+   * runs ahead of the kernel's packet position.
+   *
+   * The wakeup seqno must match the kernel's packet stream position.
+   * fifo_count_hw tracks buffers still awaiting hardware fill, so
+   * (sbseq - fifo_count_hw) gives the sbseq of the earliest unfilled
+   * buffer - the point in the packet stream we're actually waiting for. */
+  sb = vi->ep_state->rxq.efct_state[qix].sbseq;
+  hw = vi->ep_state->rxq.efct_state[qix].fifo_count_hw;
+  *sbseq = sb >= hw ? (unsigned)(sb - hw) : 0;
+  *pktix = rxq_ptr->superbuf_pkts - 1;
+  return 0;
 }
 
 static int efct_ubufs_prime(ef_vi* vi, ef_driver_handle dh)
