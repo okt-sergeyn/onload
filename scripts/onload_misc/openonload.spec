@@ -416,6 +416,8 @@ mkdir -p "$i_prefix/etc/depmod.d"
 %endif
 %if %{with user}
 %py3_install
+sed -s -i -E '1s|^#![[:space:]]*(/usr)?/bin/(env[[:space:]]+)?python3|#!/usr/libexec/platform-python|; t; 1q1' \
+  $i_prefix%{_sbindir}/sfcirqaffinity $i_prefix%{_sbindir}/sfcaffinity_config
 # Removing these files is fine since they would only ever be generated on a build machine.
 rm -f "$i_prefix/etc/sysconfig/modules/onload.modules"
 rm -f "$i_prefix/usr/local/lib/modules-load.d/onload.conf"
