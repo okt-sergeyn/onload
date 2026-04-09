@@ -65,4 +65,11 @@ specified as an IRQ affinity hint on interfaces where interrupts are
 managed by Onload.
 
 
+solar_clusterd script moved to SolarCapture
+-------------------------------------------
+
+The solar_clusterd script has moved to the SolarCapture repository:
+https://github.com/Xilinx-CNS/solarcapture/tree/main/src/solar_clusterd
+
+
 (c) Copyright 2026 Advanced Micro Devices, Inc.
