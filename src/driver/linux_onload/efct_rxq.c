@@ -25,6 +25,17 @@ int oo_ubuf_post_mmap(struct file *file, struct vm_area_struct *vma)
   if( !priv->thr )
     return -ENODEV;
 
+  if( (offset & ~PAGE_MASK) != 0 )
+    return -EINVAL;
+
+  if( bytes != CI_PAGE_SIZE )
+    return -EINVAL;
+
+  if( intf_i < 0 || intf_i >= oo_stack_intf_max(&priv->thr->netif) )
+    return -EINVAL;
+
+  if( ix < 0 || ix >= EF_VI_MAX_EFCT_RXQS )
+    return -EINVAL;
   rxq = priv->thr->nic[intf_i].thn_efct_rxq[ix];
   if( !rxq )
     return -ENOENT;
