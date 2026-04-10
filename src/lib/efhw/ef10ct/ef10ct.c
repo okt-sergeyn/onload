@@ -1170,35 +1170,6 @@ ef10ct_dmaq_tx_q_init(struct efhw_nic *nic,
   return rc;
 }
 
-static int
-ef10ct_rx_buffer_post_register(struct efhw_nic* nic, int instance,
-                               resource_size_t* addr_out)
-{
-  int rc;
-  struct device *dev;
-  struct efx_auxdev* edev;
-  struct efx_auxdev_client* cli;
-  union efx_auxiliary_param_value val = {0};
-  int rxq_handle;
-
-  rxq_handle = ef10ct_reconstruct_queue_handle(instance,
-                                               EF10CT_QUEUE_HANDLE_TYPE_RXQ);
-  val.queue_io_wnd.qid_in = rxq_handle;
-
-  EFHW_TRACE("%s: instance 0x%x", __func__, instance);
-
-  AUX_PRE(dev, edev, cli, nic, rc);
-  rc = edev->llct_ops->base_ops->get_param(cli, EFX_AUXILIARY_RXQ_WINDOW, &val);
-  AUX_POST(dev, edev, cli, nic, rc);
-
-  if( rc < 0 )
-    return rc;
-
-  *addr_out = val.queue_io_wnd.base;
-
-  return 0;
-}
-
 static int ef10ct_rx_iomap_buffer_post_register(struct efhw_nic *nic,
                                                 int rxq_handle, void **addr_out,
                                                 resource_size_t* io_addr_out)
@@ -2324,7 +2295,6 @@ struct efhw_func_ops ef10ct_char_functional_units = {
   .get_pci_dev = ef10ct_get_pci_dev,
   .vi_io_region = ef10ct_vi_io_region,
   .ctpio_addr = ef10ct_ctpio_addr,
-  .rxq_window = ef10ct_rx_buffer_post_register,
   .post_superbuf =  ef10ct_rxq_post_superbuf,
   .design_parameters = ef10ct_design_parameters,
   .max_shared_rxqs = ef10ct_max_shared_rxqs,
