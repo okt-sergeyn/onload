@@ -207,6 +207,21 @@ void ef10ct_free_rxq(struct efhw_nic *nic, int rxq_id)
   ef10ct->rxq[rxq_num].state = EF10CT_RXQ_STATE_FREE;
 }
 
+/* We should never get an invalid queue number; but if we somehow do, we ought
+ * to free the queue. Don't call `ef10ct_free_rxq` as that would attempt to
+ * check the non-existent queue state. */
+static void ef10ct_free_invalid_rxq(struct efhw_nic *nic, int rxq_id)
+{
+  int rc = 0;
+  struct device *dev;
+  struct efx_auxdev* edev;
+  struct efx_auxdev_client* cli;
+
+  AUX_PRE(dev, edev, cli, nic, rc);
+  edev->llct_ops->rxq_free(cli, rxq_id);
+  AUX_POST(dev, edev, cli, nic, rc);
+}
+
 static int ef10ct_is_shared_evq(struct efhw_nic *nic, int evq_num)
 {
   struct efhw_nic_ef10ct *ef10ct = nic->arch_extra;
@@ -1274,9 +1289,15 @@ ef10ct_rxq_init_mcdi(struct efhw_nic* nic, int q_size, int evq, int rxq_num,
 
 static int ef10ct_shared_rxq_alloc(struct efhw_nic *nic)
 {
-  int rc;
+  struct efhw_nic_ef10ct *ef10ct = nic->arch_extra;
+  int rxq_handle;
+  int rxq_num;
 
-  rc = ef10ct_alloc_rxq(nic);
+  rxq_handle = ef10ct_alloc_rxq(nic);
+  if( rxq_handle < 0 ) {
+    EFHW_WARN("%s failed to allocate rxq, rc = %d", __func__, rxq_handle);
+    return rxq_handle;
+  }
 
   /* FIXME ON-16711 full lifetime management of this RXQ. We do the queue init
    * on demand on first attach, where we have information about the VI user
@@ -1287,32 +1308,31 @@ static int ef10ct_shared_rxq_alloc(struct efhw_nic *nic)
    * - resource re-allocation post reset
    */
 
-  /* Update efhw's understanding of the state of this rxq */
-  if( rc >= 0 ) {
-    struct efhw_nic_ef10ct *ef10ct = nic->arch_extra;
-    int rxq_num = ef10ct_get_queue_num(rc);
-
-    mutex_lock(&ef10ct->rxq[rxq_num].bind_lock);
-
-    if( rxq_num < ef10ct->rxq_n ) {
-      if( ef10ct->rxq[rxq_num].state == EF10CT_RXQ_STATE_FREE )
-        ef10ct->rxq[rxq_num].state = EF10CT_RXQ_STATE_ALLOCATED;
-      else
-        EFHW_WARN("%s Allocated rxq %d but it was not in the FREE state."
-                  " state = %u", __func__, rxq_num, ef10ct->rxq[rxq_num].state);
-    }
-
-    mutex_unlock(&ef10ct->rxq[rxq_num].bind_lock);
-
-    /* This needs to use queue number as visible to the upper layers rather
-     * than the MCDI handle, as it's not going straight to the HW but being
-     * used as part of the queue selection process, which operates on host
-     * side handles. */
-    rc = rxq_num;
+  rxq_num = ef10ct_get_queue_num(rxq_handle);
+  if( rxq_num < 0 || rxq_num >= ef10ct->rxq_n ) {
+    EFHW_WARN("%s allocated invalid rxq %d (rxq_handle=%d, rxq_n=%u)",
+              __func__, rxq_num, rxq_handle, ef10ct->rxq_n);
+    ef10ct_free_invalid_rxq(nic, rxq_handle);
+    return -EINVAL;
   }
 
-  EFHW_TRACE("%s rc %d", __func__, rc);
-  return rc;
+  /* Update efhw's understanding of the state of this rxq */
+  mutex_lock(&ef10ct->rxq[rxq_num].bind_lock);
+
+  if( ef10ct->rxq[rxq_num].state == EF10CT_RXQ_STATE_FREE )
+    ef10ct->rxq[rxq_num].state = EF10CT_RXQ_STATE_ALLOCATED;
+  else
+    EFHW_WARN("%s Allocated rxq %d but it was not in the FREE state."
+              " state = %u", __func__, rxq_num, ef10ct->rxq[rxq_num].state);
+
+  mutex_unlock(&ef10ct->rxq[rxq_num].bind_lock);
+
+  /* This needs to use queue number as visible to the upper layers rather
+   * than the MCDI handle, as it's not going straight to the HW but being
+   * used as part of the queue selection process, which operates on host
+   * side handles. */
+  EFHW_TRACE("%s allocated rxq %d", __func__, rxq_num);
+  return rxq_num;
 }
 
 static int
