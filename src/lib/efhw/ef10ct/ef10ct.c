@@ -1200,7 +1200,8 @@ ef10ct_rx_buffer_post_register(struct efhw_nic* nic, int instance,
 }
 
 static int ef10ct_rx_iomap_buffer_post_register(struct efhw_nic *nic,
-                                                int rxq_handle, void **addr_out)
+                                                int rxq_handle, void **addr_out,
+                                                resource_size_t* io_addr_out)
 {
   int rc;
   struct device *dev;
@@ -1228,6 +1229,7 @@ static int ef10ct_rx_iomap_buffer_post_register(struct efhw_nic *nic,
   }
 
   *addr_out = io;
+  *io_addr_out = val.queue_io_wnd.base;
   return 0;
 }
 
@@ -1355,6 +1357,7 @@ ef10ct_shared_rxq_bind(struct efhw_nic* nic,
   int rc = 0;
   int i;
   void **post_buffer_addr;
+  resource_size_t *post_buffer_io_addr;
   bool suppress_events = false;
   bool real_evq = params->interrupt_req &&
                   params->wakeup_instance < ef10ct->evq_n;
@@ -1469,7 +1472,9 @@ ef10ct_shared_rxq_bind(struct efhw_nic* nic,
   }
 
   post_buffer_addr = (void **)&ef10ct->rxq[rxq_num].post_buffer_addr;
-  rc = ef10ct_rx_iomap_buffer_post_register(nic, rxq_handle, post_buffer_addr);
+  post_buffer_io_addr = &params->rxq->urxq.rx_buffer_post_register;
+  rc = ef10ct_rx_iomap_buffer_post_register(nic, rxq_handle, post_buffer_addr,
+                                            post_buffer_io_addr);
   if (rc < 0) {
     EFHW_ERR("%s Failed to iomap rx post register. rc = %d", __func__, rc);
     goto fail4;

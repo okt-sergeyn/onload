@@ -268,14 +268,6 @@ int efrm_rxq_alloc(struct efrm_vi *vi, int qid, int shm_ix, bool timestamp_req,
 		goto fail_bind;
 	if( shm_ix >= 0 )
 		vi->efct_shm->active_qs |= 1ull << shm_ix;
-	if( shm_ix < 0 ) {
-		resource_size_t io_addr;
-		rc = efhw_nic_rxq_window(nic, rxq->hw.qid, &io_addr);
-		if( rc < 0 )
-			goto fail_rxq_window;
-
-		rxq->hw.urxq.rx_buffer_post_register = io_addr;
-	}
 	efrm_resource_init(&rxq->rs, EFRM_RESOURCE_EFCT_RXQ, 0);
 	efrm_client_add_resource(vi_rs->rs_client, &rxq->rs);
 	efrm_resource_ref(vi_rs);
@@ -285,8 +277,6 @@ int efrm_rxq_alloc(struct efrm_vi *vi, int qid, int shm_ix, bool timestamp_req,
 	*qid_out = rxq->hw.qid;
 	return 0;
 
-fail_rxq_window:
-	efhw_nic_shared_rxq_unbind(nic, &rxq->hw, free_rxq);
 fail_bind:
 	kfree(rxq);
 	return rc;
