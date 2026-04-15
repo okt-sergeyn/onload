@@ -17,6 +17,7 @@ Features:
 ON-15570: allow X4 CTPIO queue size to be configured and add per-NIC defaults
 ON-16192: X4: support filter_id for ef_vi on Enterprise Path
 ON-16321: X4: report RxQ state in stackdump
+ON-17171: add EVQ accounting to efct VIs and reserve 8 slots for X4 express
 ON-17178: X4: make shrub controller interrupt-driven
 ON-17197: add Onload stats for CTPIO transmit failures
 ON-17198: add env var to configure irq affinity for onload interrupts
