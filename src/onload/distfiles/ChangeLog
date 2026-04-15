@@ -25,6 +25,7 @@ Fixes:
 
 ON-13695: minor maintenance to JNI headers
 ON-15103: fix time wraparound that caused spurious keepalive
+ON-16247: fix RPM build in the presence of multiple python versions
 ON-16253: X4: have shrub controller explicitly request 2MB huge pages
 ON-16312: X4: harden shrub controller against slow clients
 ON-16828: fix kernel crash binding to X3/X4 queue without user context
