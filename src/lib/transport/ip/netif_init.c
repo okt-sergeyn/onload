@@ -2451,8 +2451,8 @@ static int netif_tcp_helper_build(ci_netif* ni)
                     vi_efct_shm_offset,
                     &vi_mem_ptr, vi, nsn->vi_instance,
                     nsn->vi_evq_bytes, nsn->vi_txq_size,
-                    &ni->state->vi_stats, &dp, ns->intf_i_to_hwport[nic_i],
-                    nsn->vi_evq_reserved_slots);
+                    &ni->state->nic[nic_i].vi_stats, &dp,
+                    ns->intf_i_to_hwport[nic_i], nsn->vi_evq_reserved_slots);
     if( rc )
       goto fail2;
     if( NI_OPTS(ni).tx_push )

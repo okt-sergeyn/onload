@@ -32,6 +32,7 @@ ON-16312: X4: harden shrub controller against slow clients
 ON-16828: fix kernel crash binding to X3/X4 queue without user context
 ON-17018: fix hw filter equivalency check to work for both X3 and X4
 ON-17153: fix dynamic linking error with libciul shrub_log_to_fd
+ON-17340: All X4 onload vis write to the same single global stats block
 
 
 onload-9.1.1.66

@@ -2050,7 +2050,7 @@ static int allocate_vis(tcp_helper_resource_t* trs,
 
     vi = ci_netif_vi(ni, intf_i);
     rc = initialise_vi(ni, vi, tcp_helper_vi(trs, intf_i), vm, vi_state, nic,
-                       &alloc_info, &vi_out_flags, &ni->state->vi_stats);
+                       &alloc_info, &vi_out_flags, &ni->state->nic[intf_i].vi_stats);
     if( rc < 0 )
       goto error_out;
 

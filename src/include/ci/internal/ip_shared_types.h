@@ -1024,6 +1024,7 @@ typedef struct {
   ci_uint32             ctpio_max_frame_len;
 #endif
   bool                  shrub_queues[EF_VI_MAX_EFCT_RXQS];
+  ef_vi_stats           vi_stats CI_ALIGN(8);
 } ci_netif_state_nic_t;
 
 
@@ -1371,7 +1372,6 @@ struct ci_netif_state_s {
   volatile ci_uint16    dump_write_i;
 #endif
 
-  ef_vi_stats           vi_stats CI_ALIGN(8);
 
   CI_ULCONST ci_int32   creation_numa_node;
   CI_ULCONST ci_int32   load_numa_node;
