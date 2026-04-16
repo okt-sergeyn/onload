@@ -2239,12 +2239,15 @@ static int init_ef_vi(ci_netif* ni, int nic_i, int vi_state_offset,
                       char** vi_mem_ptr,
                       ef_vi* vi, unsigned vi_instance,
                       int evq_bytes, int txq_size, ef_vi_stats* vi_stats,
-                      struct efab_nic_design_parameters* dp, ci_hwport_id_t hw_port)
+                      struct efab_nic_design_parameters* dp,
+                      ci_hwport_id_t hw_port,
+                      unsigned evq_reserved_slots)
 {
   ef_vi_state* state = (void*) ((char*) ni->state + vi_state_offset);
   ci_netif_state_nic_t* nsn = &(ni->state->nic[nic_i]);
   uint32_t* ids = (void*) (state + 1);
   unsigned vi_bar_off = vi_instance * 8192;
+  unsigned evq_size = evq_bytes / 8;
   int rc;
 
   rc = ef_vi_init(vi, ef_vi_arch_from_efhw_arch(nsn->vi_arch), nsn->vi_variant,
@@ -2256,7 +2259,8 @@ static int init_ef_vi(ci_netif* ni, int nic_i, int vi_state_offset,
   ef_vi_init_timer(vi, nsn->timer_quantum_ns);
   vi->vi_i = vi_instance;
   vi->dh = ci_netif_get_driver_handle(ni);
-  *vi_mem_ptr = ef_vi_init_qs(vi, *vi_mem_ptr, ids, evq_bytes / 8,
+  *vi_mem_ptr = ef_vi_init_qs(vi, *vi_mem_ptr, ids, evq_size,
+                              evq_size - evq_reserved_slots,
                               nsn->vi_rxq_size, nsn->rx_prefix_len, txq_size);
   if( vi->internal_ops.design_parameters ) {
     rc = vi->internal_ops.design_parameters(vi, dp);
@@ -2447,7 +2451,8 @@ static int netif_tcp_helper_build(ci_netif* ni)
                     vi_efct_shm_offset,
                     &vi_mem_ptr, vi, nsn->vi_instance,
                     nsn->vi_evq_bytes, nsn->vi_txq_size,
-                    &ni->state->vi_stats, &dp, ns->intf_i_to_hwport[nic_i]);
+                    &ni->state->nic[nic_i].vi_stats, &dp,
+                    ns->intf_i_to_hwport[nic_i], nsn->vi_evq_reserved_slots);
     if( rc )
       goto fail2;
     if( NI_OPTS(ni).tx_push )

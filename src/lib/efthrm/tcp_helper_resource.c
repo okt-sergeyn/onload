@@ -1082,7 +1082,6 @@ static int tcp_helper_rxq_alloc(tcp_helper_resource_t* trs,
     int qix;
     int rc;
     int hugepages = 0;
-    int superbufs;
     /* FIXME ON-16391 avoid the arch check here */
     bool shrub = vi->nic_type.arch == EF_VI_ARCH_EF10CT &&
                  (token == efrm_pd_shared_rxq_token_get(pd));
@@ -1125,29 +1124,12 @@ static int tcp_helper_rxq_alloc(tcp_helper_resource_t* trs,
       return rc;
     }
 
-    /* TODO: ON-16824: get this working with the ulhelper build */
-#if ! CI_CFG_UL_INTERRUPT_HELPER
     efct_get_rxq_state(vi, qix)->generates_events =
       ! efrm_rxq_get_hw(trs->nic[intf_i].thn_efct_rxq[qix])->uses_shared_evq;
 
-    /* Because we're not guaranteed to have the netif lock at this point, we
-     * defer updating n_evq_rx_pkts until the next time the netif lock is
-     * unlocked. */
-    superbufs = hugepages * CI_EFCT_SUPERBUFS_PER_PAGE;
-    ci_atomic_add(&trs->netif.state->efct_rxq_deferred_superbufs[intf_i],
-                  superbufs * efct_get_rxq_state(vi, qix)->generates_events);
-    if( efab_tcp_helper_netif_lock_or_set_flags(trs,
-                                                OO_TRUSTED_LOCK_RX_ACCOUNTING,
-                                                CI_EPLOCK_NETIF_RX_ACCOUNTING,
-                                                0) ) {
-      ef_eplock_holder_set_single_flag(&trs->netif.state->lock,
-                                       CI_EPLOCK_NETIF_RX_ACCOUNTING);
-      efab_tcp_helper_netif_unlock(trs, 0);
-    }
-#endif
-
     if (vi->nic_type.arch == EF_VI_ARCH_EF10CT && !shrub) {
       int pg, sb;
+      int superbufs = hugepages * CI_EFCT_SUPERBUFS_PER_PAGE;
       const int pg_per_sb = EFCT_RX_SUPERBUF_BYTES / EFHW_NIC_PAGE_SIZE;
       ef_addr* dma_addrs;
 
@@ -1628,7 +1610,8 @@ static void choose_evq_size(struct vi_allocate_info* info)
     ;
 }
 
-static int allocate_vi(ci_netif* ni, struct vi_allocate_info* info)
+static int allocate_vi(ci_netif* ni, struct vi_allocate_info* info,
+                       struct efhw_nic* nic)
 {
   int rc = -EDOM;  /* Placate compiler. */
 
@@ -1708,6 +1691,9 @@ static int allocate_vi(ci_netif* ni, struct vi_allocate_info* info)
         info->efhw_flags  |= features[i].efhw_flags;
         info->oo_vi_flags |= features[i].oo_vi_flags;
       }
+
+    info->evq_reserved_events =
+      efhw_get_evq_reserved_slots(nic, info->efhw_flags);
 
     /* This is a loop to try double allocation. If it fails initialy an attempt
      * is made to find and release orphaned stack and try allocation again.  */
@@ -1837,7 +1823,8 @@ static int initialise_vi(ci_netif* ni, struct ef_vi* vi, struct efrm_vi* vi_rs,
   ef_vi_init_out_flags( vi, *vi_out_flags);
   ef_vi_init_io(vi, vm->io_page);
   ef_vi_init_timer(vi, vm->timer_quantum_ns);
-  ef_vi_init_evq(vi, vm->evq_size, vm->evq_base);
+  ef_vi_init_evq(vi, vm->evq_size, vm->evq_base,
+                 vm->evq_size - alloc_info->evq_reserved_events);
   if( vm->rxq_size > 0 ) {
     ef_vi_init_rxq(vi, vm->rxq_size, vm->rxq_descriptors, vi_ids,
                    vm->rxq_prefix_len);
@@ -2046,7 +2033,7 @@ static int allocate_vis(tcp_helper_resource_t* trs,
     nsn->pd_owner = efrm_pd_owner_id(alloc_info.pd);
 
     alloc_info.virs = &trs_nic->thn_vi_rs;
-    rc = allocate_vi(ni, &alloc_info);
+    rc = allocate_vi(ni, &alloc_info, nic);
     if( rc != 0 )
       goto error_out;
 
@@ -2063,7 +2050,7 @@ static int allocate_vis(tcp_helper_resource_t* trs,
 
     vi = ci_netif_vi(ni, intf_i);
     rc = initialise_vi(ni, vi, tcp_helper_vi(trs, intf_i), vm, vi_state, nic,
-                       &alloc_info, &vi_out_flags, &ni->state->vi_stats);
+                       &alloc_info, &vi_out_flags, &ni->state->nic[intf_i].vi_stats);
     if( rc < 0 )
       goto error_out;
 
@@ -2096,6 +2083,7 @@ static int allocate_vis(tcp_helper_resource_t* trs,
     nsn->vi_flags = alloc_info.ef_vi_flags;
     nsn->vi_out_flags = vi_out_flags;
     nsn->vi_evq_bytes = efrm_vi_rm_evq_bytes(vi_rs, -1);
+    nsn->vi_evq_reserved_slots = alloc_info.evq_reserved_events;
     nsn->vi_rxq_size = vm->rxq_size;
     nsn->vi_txq_size = vm->txq_size;
     nsn->timer_quantum_ns = vm->timer_quantum_ns;
@@ -7764,23 +7752,6 @@ tcp_helper_unlock_prime(tcp_helper_resource_t* thr)
   }
 }
 
-static inline void
-tcp_helper_handle_deferred_superbuf_init(tcp_helper_resource_t* thr)
-{
-  const uint64_t pkts_per_superbuf = EFCT_RX_SUPERBUF_BYTES / EFCT_PKT_STRIDE;
-  ci_netif* ni = &thr->netif;
-  int intf_i;
-
-  OO_STACK_FOR_EACH_INTF_I(ni, intf_i) {
-    ci_atomic_t *atomic = &ni->state->efct_rxq_deferred_superbufs[intf_i];
-    ef_vi* vi = ci_netif_vi(ni, intf_i);
-    int deferred_superbufs;
-
-    deferred_superbufs = ci_atomic_xchg(atomic, 0);
-    vi->ep_state->rxq.n_evq_rx_pkts += deferred_superbufs * pkts_per_superbuf;
-  }
-}
-
 #if ! CI_CFG_UL_INTERRUPT_HELPER
 /*--------------------------------------------------------------------
  *!
@@ -7978,11 +7949,6 @@ efab_tcp_helper_netif_lock_callback(eplock_helper_t* epl, ci_uint64 lock_val,
       flags_set &= ~CI_EPLOCK_NETIF_HANDLE_ICMP;
     }
 #endif
-
-    if( flags_set & CI_EPLOCK_NETIF_RX_ACCOUNTING ) {
-      tcp_helper_handle_deferred_superbuf_init(thr);
-      flags_set &= ~CI_EPLOCK_NETIF_RX_ACCOUNTING;
-    }
 
     if( flags_set & CI_EPLOCK_NETIF_REINIT_TXQS ) {
       tcp_helper_reinit_txqs_locked(thr);

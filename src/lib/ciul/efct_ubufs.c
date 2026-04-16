@@ -135,10 +135,15 @@ static void post_buffers(ef_vi* vi, int ix)
 {
   ef_vi_efct_rxq_state* state = &vi->ep_state->rxq.efct_state[ix];
   unsigned limit = get_ubufs(vi)->nic_fifo_limit;
+  const unsigned pkts_per_superbuf = EFCT_RX_SUPERBUF_BYTES / EFCT_PKT_STRIDE;
+  const unsigned required_evq_slots = (unsigned)state->generates_events *
+                                      pkts_per_superbuf;
   bool free_list_was_empty = ( state->free_head == -1 );
   bool fifo_was_full = ( state->fifo_count_hw >= limit );
+  bool evq_no_space = ( ! ef_vi_can_consume_evq_slots(vi, required_evq_slots) );
 
-  while( state->free_head != -1 && state->fifo_count_hw < limit ) {
+  while( state->free_head != -1 && state->fifo_count_hw < limit &&
+         ef_vi_consume_evq_slots(vi, required_evq_slots) ) {
     int16_t id = state->free_head;
     const ci_qword_t* header = efct_superbuf_access(vi, ix, id);
     struct efct_rx_descriptor* desc = efct_rx_desc_for_sb(vi, ix, id);
@@ -165,6 +170,8 @@ static void post_buffers(ef_vi* vi, int ix)
     EF10CT_STATS_INC(vi, ix, buffers_posted);
   }
 
+  if ( evq_no_space )
+    EF10CT_STATS_INC(vi, ix, rollover_failed_no_evq_space);
   if ( free_list_was_empty )
     EF10CT_STATS_INC(vi, ix, free_list_empty);
   if ( fifo_was_full )

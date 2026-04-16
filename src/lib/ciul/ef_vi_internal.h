@@ -329,4 +329,35 @@ ci_inline uint64_t efct_tx_scale_offset_bytes(uint64_t offset_bytes)
   return offset_bytes / sizeof(efct_tx_aperture_t);
 }
 
+ci_inline bool ef_vi_can_consume_evq_slots(ef_vi* vi, int n_slots)
+{
+  EF_VI_ASSERT(n_slots >= 0);
+  return vi->evq_vi->ep_state->evq.min_unused_evq_slots >= n_slots;
+}
+
+ci_inline void ef_vi_consume_evq_slots_unchecked(ef_vi* vi, int n_slots)
+{
+  EF_VI_ASSERT(n_slots >= 0);
+  vi->evq_vi->ep_state->evq.min_unused_evq_slots -= n_slots;
+}
+
+ci_inline bool ef_vi_consume_evq_slots(ef_vi* vi, int n_slots)
+{
+  EF_VI_ASSERT(n_slots >= 0);
+
+  if( ! ef_vi_can_consume_evq_slots(vi, n_slots) )
+    return false;
+
+  ef_vi_consume_evq_slots_unchecked(vi, n_slots);
+  EF_VI_ASSERT(vi->evq_vi->ep_state->evq.min_unused_evq_slots >= 0);
+
+  return true;
+}
+
+ci_inline void ef_vi_return_evq_slots(ef_vi* vi, int n_slots)
+{
+  EF_VI_ASSERT(n_slots >= 0);
+  vi->evq_vi->ep_state->evq.min_unused_evq_slots += n_slots;
+}
+
 #endif  /* __CI_EF_VI_INTERNAL_H__ */

@@ -48,6 +48,8 @@ The size of the descriptor ring for transmissions on the X4 Express
 datapath ('CTPIO') is now configurable. The EF_TXQ_SIZE and EF_RXQ_SIZE
 per-interface configuration options have been updated to accept -1
 to indicate that an architecture-appropriate default should be used.
+As a result, up to 256 VIs with TXQs on the X4 Express datapath can
+now be allocated instead of the previous maximum of 128.
 
 
 X4 SHRUB Controller now interrupt-driven
