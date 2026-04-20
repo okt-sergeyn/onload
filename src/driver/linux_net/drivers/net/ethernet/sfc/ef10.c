@@ -1507,8 +1507,6 @@ static int efx_ef10_init_nic(struct efx_nic *efx)
 		}
 		nic_data->must_enable_netport_events = false;
 	}
-	netif_dbg(efx, drv, efx->net_dev, "%s: num_mac_stats = %u\n",
-		  __func__, efx->num_mac_stats);
 
 	nic_data->mc_stats = kmalloc(efx->stats_dma_size, GFP_KERNEL);
 	if (!nic_data->mc_stats)
